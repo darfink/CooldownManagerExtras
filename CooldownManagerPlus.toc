@@ -1,0 +1,30 @@
+## Interface: 16001
+## Title: Cooldown Manager |cff4fa3ffPlus|r
+## Notes: Extends Blizzard's Cooldown Manager inside Edit Mode: centering, anchoring, icon styling, per-spell borders and width matching.
+## Version: 0.1.0
+## SavedVariables: CooldownManagerPlusDB
+## OptionalDeps: Blizzard_EditMode, Blizzard_CooldownViewer, Blizzard_PersonalResourceDisplay, LibSharedMedia-3.0, SharedMedia, Masque, MasqueBlizzBars
+## AllowLoadGameType: camelot, standard
+
+# Private (namespaced) copy of LibEditMode, bundled unmodified.
+Libs\LibEditMode\namespaced.lua
+Libs\LibEditMode\embed.xml
+
+Core.lua
+Diagnostics.lua
+Profiles.lua
+Share.lua
+EditSession.lua
+MasqueCoexist.lua
+Media.lua
+Layout.lua
+Skin.lua
+Anchors.lua
+Overlay.lua
+Keybinds.lua
+Timers.lua
+Lockouts.lua
+Mana.lua
+Settings.lua
+SpellMenu.lua
+Options.lua
