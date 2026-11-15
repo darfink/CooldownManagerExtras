@@ -1,0 +1,1 @@
+Bundled from https://github.com/p3lim-wow/LibEditMode @ adfa353 (unmodified)
