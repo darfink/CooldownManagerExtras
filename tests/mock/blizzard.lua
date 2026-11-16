@@ -45,6 +45,26 @@ function B.install(H)
 	end
 	B.overrideSystemMethods = overrideSystemMethods
 
+	-- Edit Mode's drag handlers (EditModeSystemMixin): the addon post-hooks them. Blizzard's
+	-- own code moves the frame; the harness does that with H.drag.
+	local function dragMethods(frame)
+		frame.OnDragStart = function() end
+		frame.OnDragStop = function() end
+		frame.ProcessMovementKey = function() end
+	end
+	B.dragMethods = dragMethods
+
+	-- Drag a frame in Edit Mode so its visible TOPLEFT lands at (left, top), UI units.
+	-- during(frame) runs while the mouse is still down (to look at the preview).
+	function H.drag(frame, left, top, during)
+		frame:OnDragStart()
+		H.raw.ClearAllPoints(frame)
+		H.raw.SetPoint(frame, "TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+		if during then during(frame) end
+		frame:OnDragStop()
+		H.flush()
+	end
+
 	---------------------------------------------------------------------------
 	-- Edit Mode
 	---------------------------------------------------------------------------
@@ -71,6 +91,15 @@ function B.install(H)
 	manager.SaveChangesButton = CreateFrame("Button", nil, manager)
 	manager.RevertAllChangesButton = CreateFrame("Button", nil, manager)
 	H.editModeManager = manager
+
+	-- One of Blizzard's other Edit Mode frames (an action bar), a target to attach to.
+	local actionBar = CreateFrame("Frame", "MainActionBar", UIParent)
+	actionBar.system = 1
+	actionBar.GetSystemName = function() return "Action Bar 1" end
+	H.raw.SetSize(actionBar, 500, 40)
+	H.raw.SetPoint(actionBar, "BOTTOM", UIParent, "BOTTOM", 0, 20)
+	table.insert(manager.registeredSystemFrames, actionBar)
+	H.actionBar = actionBar
 
 	local dialog = CreateFrame("Frame", "EditModeSystemSettingsDialog", UIParent)
 	dialog:SetSize(380, 350)
@@ -324,6 +353,7 @@ function B.install(H)
 		viewer.RefreshData = function() end
 		viewer.Layout = gridLayout
 		overrideSystemMethods(viewer)
+		dragMethods(viewer)
 		-- park it on screen without going through the (recording) override
 		H.raw.SetSize(viewer, def.size, def.size)
 		H.raw.SetPoint(viewer, "CENTER", UIParent, "CENTER", 0, 0)
@@ -378,6 +408,7 @@ function B.install(H)
 		prd.systemInfo = { isInDefaultPosition = false }
 		H.raw.SetSize(prd, 200, 40)
 		overrideSystemMethods(prd)
+		dragMethods(prd)
 		H.raw.SetPoint(prd, "CENTER", UIParent, "CENTER", 0, -200)
 		local function bar(parent, name)
 			local b = CreateFrame("StatusBar", nil, parent)

@@ -1383,7 +1383,8 @@ function M.new(opts)
 	G.GetActionInfo = function() return nil end
 	G.GetInventoryItemID = function(_, slot) return H.inventory[slot] end
 	G.IsAltKeyDown = function() return false end
-	G.IsShiftKeyDown = function() return false end
+	H.shiftDown = false
+	G.IsShiftKeyDown = function() return H.shiftDown == true end
 
 	-- auras: H.auras[unit][instanceID] = aura table
 	H.auras = { player = {}, target = {} }

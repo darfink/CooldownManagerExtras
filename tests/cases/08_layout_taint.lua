@@ -97,3 +97,95 @@ T.test("share: export then import round-trips the settings into a new profile", 
 	local bad, why = CMP.Share:Import("not an export", "Nope", true)
 	T.falsy(bad)
 end)
+
+-- At UI scales other than 1, Blizzard's icon size is a fraction of a pixel and a centered
+-- frame can start half a pixel off; the game then rounds edges differently, so the bars and
+-- the icons below them (and icons and their borders) end up a pixel apart.
+for _, cfg in ipairs({ { ui = 0.64, prd = 1 }, { ui = 0.71, prd = 1.1 }, { ui = 0.53, prd = 0.9 } }) do
+	T.test(("layout: rows and bars line up on whole pixels (UI scale %.2f, PRD scale %.1f)"):format(cfg.ui, cfg.prd), function(H, T)
+		local CMP = H.CMP
+		H.state(H.UIParent).scale = cfg.ui
+		H.viewers.PRD:SetScale(cfg.prd)
+		for _, key in ipairs({ "Essential", "Utility" }) do
+			H.viewers[key].systemInfo.isInDefaultPosition = false
+			for i = 1, (key == "Essential" and 7 or 8) do
+				H.spells[100 * i] = { name = "S" .. i }
+				H.viewers[key]:AddItem({ spellID = 100 * i })
+			end
+			CMP:Set(key, "style", "square")
+			CMP:Set(key, "align", "center")
+			CMP:Set(key, "spacingX", 0)
+			CMP:Set(key, "sharedBorders", true)
+		end
+		CMP:Set("Utility", "attachTo", "Essential")
+		CMP:Set("Utility", "matchWidth", "target")
+		CMP:Set("PRD", "attachTo", "Essential")
+		CMP:Set("PRD", "attachSide", "ABOVE")
+		CMP:Set("PRD", "matchWidth", "widest")
+		CMP:Set("PRD", "style", "square")
+		H.flush()
+		local function px(v, frame) return v * frame:GetEffectiveScale() / H.pixelFactor end
+		local function whole(v) return math.abs(v - math.floor(v + 0.5)) < 0.01 end
+		local l, _, w = CMP.Anchors:VisibleRect(H.viewers.PRD)
+		local prdL, prdR = px(l, H.UIParent), px(l + w, H.UIParent)
+		T.truthy(whole(prdL) and whole(prdR), ("PRD on whole pixels: %.3f %.3f"):format(prdL, prdR))
+		for _, key in ipairs({ "Essential", "Utility" }) do
+			local left, right = math.huge, -math.huge
+			for _, it in ipairs(H.viewers[key].items) do
+				local a, b = px(it:GetLeft(), it), px(it:GetRight(), it)
+				T.truthy(whole(a) and whole(b), ("%s icon on whole pixels: %.3f %.3f"):format(key, a, b))
+				left, right = math.min(left, a), math.max(right, b)
+			end
+			T.near(left, prdL, 0.01, key .. " starts where the bars start")
+			T.near(right, prdR, 0.01, key .. " ends where the bars end")
+		end
+	end)
+end
+
+T.test("layout: rows matching the PRD's own (fractional) width line up with it on whole pixels", function(H, T)
+	local CMP = H.CMP
+	H.state(H.UIParent).scale = 0.71
+	local prd = H.viewers.PRD
+	prd:SetScale(1.1)
+	prd.defaultBarWidth, prd.barWidthPercent = 200, 157 -- 314 units * 1.1 * 0.71: not whole pixels
+	H.raw.SetWidth(prd, 314)
+	for _, part in ipairs({ prd.HealthBarsContainer, prd.PowerBar, prd.AlternatePowerBar }) do H.raw.SetWidth(part, 314) end
+	-- placed by Edit Mode, off the pixel grid
+	prd.systemInfo = { anchorInfo = { point = "CENTER", relativeTo = H.UIParent, relativePoint = "CENTER", offsetX = 0.37, offsetY = -200.4 } }
+	for _, key in ipairs({ "Essential", "Utility" }) do
+		H.viewers[key].systemInfo.isInDefaultPosition = false
+		for i = 1, (key == "Essential" and 7 or 8) do
+			H.spells[100 * i] = { name = "S" .. i }
+			H.viewers[key]:AddItem({ spellID = 100 * i })
+		end
+		CMP:Set(key, "style", "square")
+		CMP:Set(key, "spacingX", 0)
+		CMP:Set(key, "sharedBorders", true)
+	end
+	CMP:Set("Essential", "attachTo", "PRD")
+	CMP:Set("Essential", "matchWidth", "target")
+	CMP:Set("Utility", "attachTo", "Essential")
+	CMP:Set("Utility", "matchWidth", "target")
+	CMP:Set("PRD", "style", "square")
+	H.flush()
+	local function px(v, f) return v * f:GetEffectiveScale() / H.pixelFactor end
+	local l, _, w = CMP.Anchors:VisibleRect(prd)
+	local prdL, prdR = px(l, H.UIParent), px(l + w, H.UIParent)
+	T.near(prdL, math.floor(prdL + 0.5), 0.01, "PRD left on a whole pixel")
+	T.near(prdR, math.floor(prdR + 0.5), 0.01, "PRD right on a whole pixel")
+	for _, key in ipairs({ "Essential", "Utility" }) do
+		local a, b = math.huge, -math.huge
+		for _, it in ipairs(H.viewers[key].items) do
+			a, b = math.min(a, px(it:GetLeft(), it)), math.max(b, px(it:GetRight(), it))
+		end
+		T.near(a, prdL, 0.01, key .. " left = PRD left")
+		T.near(b, prdR, 0.01, key .. " right = PRD right")
+	end
+	-- detached again: Blizzard's exact width and spot come back
+	CMP:Set("Essential", "attachTo", "none")
+	CMP:Set("Essential", "matchWidth", "off")
+	H.flush()
+	T.near(prd:GetWidth(), 314, 0.001, "Blizzard's width")
+	local _, _, _, x = prd:GetPoint(1)
+	T.near(x, 0.37 / 1.1, 0.001, "Edit Mode's spot")
+end)

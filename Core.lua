@@ -66,6 +66,10 @@ local FALLBACK_NAMES = {
 }
 
 function CMP:GetName(key)
+	local external = self.Anchors and not self.byKey[key] and self.Anchors:External(key)
+	if external then
+		return self.Anchors:ExternalName(external)
+	end
 	local info = self.byKey[key]
 	local frame = info and info.frame
 	if frame and frame.GetSystemName then
@@ -89,7 +93,7 @@ CMP.defaults = {
 	attachTo = "none", -- none | <frame key>
 	attachSide = "BELOW", -- BELOW | ABOVE | LEFT | RIGHT
 	attachAlign = "CENTER", -- START | CENTER | END
-	attachGap = 2,
+	attachGap = 0, -- touching (0.1 used 2; older attachments keep theirs, see MigrateFrames)
 	attachOffset = 0,
 	-- Grow From on an unattached frame: the fixed point (UI units) and which point it is
 	pinX = false,
@@ -173,6 +177,22 @@ function CMP.MigratePRD(settings)
 		settings.healthTexture = nil
 	end
 	settings.powerTextures = nil -- (an unreleased per-power-type version)
+end
+
+-- Older settings for a set of frames ({ [key] = settings }). oldGap: they're from 0.1/0.2,
+-- whose default attachment gap was 2 (now 0): attached frames keep 2.
+function CMP.MigrateFrames(frames, oldGap)
+	if type(frames) ~= "table" then
+		return
+	end
+	CMP.MigratePRD(frames.PRD)
+	if oldGap then
+		for _, settings in pairs(frames) do
+			if type(settings) == "table" and settings.attachTo and settings.attachTo ~= "none" and settings.attachGap == nil then
+				settings.attachGap = 2
+			end
+		end
+	end
 end
 
 function CMP:LayoutName()
@@ -481,12 +501,14 @@ events:SetScript("OnEvent", function(_, event, arg1)
 			db.profiles = db.profiles or {}
 			db.chars = db.chars or {}
 			-- 0.1 "Screen (keep center fixed)" became Grow From: Center.
+			local oldGap = (db.version or 1) < 2
 			for _, layout in pairs(db.layouts) do
-				CMP.MigratePRD(layout.PRD)
+				CMP.MigrateFrames(layout, oldGap)
 			end
 			for _, profile in pairs(db.profiles) do
-				CMP.MigratePRD(profile.frames and profile.frames.PRD)
+				CMP.MigrateFrames(profile.frames, oldGap)
 			end
+			db.version = 2
 			for _, layout in pairs(db.layouts) do
 				for _, settings in pairs(layout) do
 					if settings.attachTo == "screen" then

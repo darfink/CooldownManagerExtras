@@ -11,9 +11,13 @@ local raw = CMP.raw
 --                      on a side, lined up by centers or an edge, with a gap. The attachment
 --                      survives the target hiding (Edit Mode's own snaps break then).
 --
--- Snapping a frame to another one in Edit Mode turns into an attachment automatically, and
--- arrow-key nudges change the attachment's gap/offset (or the fixed point), so the normal
--- Edit Mode workflow keeps working.
+-- Dragging a frame in Edit Mode shows drop zones: near an edge of another frame, a preview
+-- shows where it will attach (side and what lines up); letting go attaches it there.
+-- Dragging it away detaches it; holding Shift moves it without attaching. Arrow-key nudges
+-- change the attachment's gap/offset (or the fixed point).
+--
+-- Targets: our frames, and other named Edit Mode frames (action bars, unit frames, the
+-- cast bar, ... and add-on frames registered with LibEditMode), saved as "frame:<name>".
 
 local Anchors = {}
 CMP.Anchors = Anchors
@@ -216,8 +220,125 @@ local function DependsOn(frame, other, depth)
 	return false
 end
 
+---------------------------------------------------------------------------
+-- Other Edit Mode frames as targets
+---------------------------------------------------------------------------
+
+local externals = {} -- "frame:<name>" -> { key, frame, kind = "external" }
+Anchors.externalByFrame = setmetatable({}, { __mode = "k" })
+local hookedExternal = setmetatable({}, { __mode = "k" })
+
+-- A named frame you can attach to (nil if it doesn't exist, or is one of ours).
+function Anchors:External(key)
+	local name = type(key) == "string" and key:match("^frame:(.+)$")
+	local frame = name and _G[name]
+	if type(frame) ~= "table" or type(frame.GetRect) ~= "function" or CMP.byFrame[frame] then
+		return nil
+	end
+	local info = externals[key]
+	if not info or info.frame ~= frame then
+		info = { key = key, frame = frame, kind = "external", external = true }
+		externals[key] = info
+		self.externalByFrame[frame] = info
+	end
+	if not hookedExternal[frame] and frame.HookScript then
+		hookedExternal[frame] = true
+		-- frames attached to it with "Take its place" move when it shows or hides
+		frame:HookScript("OnShow", function()
+			CMP.Safe(self.OnVisibilityChanged, self, externals[key])
+		end)
+		frame:HookScript("OnHide", function()
+			CMP.Safe(self.OnVisibilityChanged, self, externals[key])
+		end)
+		-- Match Width can follow it: resize along (once per frame, after Blizzard's update)
+		frame:HookScript("OnSizeChanged", function()
+			if self.externalResizePending then
+				return
+			end
+			self.externalResizePending = true
+			C_Timer.After(0, function()
+				self.externalResizePending = false
+				CMP.Safe(self.UpdateWidths, self, true)
+			end)
+		end)
+	end
+	return info
+end
+
+function Anchors:ResolveTarget(key)
+	return CMP.byKey[key] or self:External(key)
+end
+
+-- The name Edit Mode shows for a frame ("Action Bar 1", "Player Frame", ...).
+function Anchors:ExternalName(info)
+	local frame = info.frame
+	local ok, name = pcall(function()
+		return frame.GetSystemName and frame:GetSystemName()
+	end)
+	if ok and type(name) == "string" and name ~= "" then
+		return name
+	end
+	local selection = CMP.LEM and CMP.LEM.frameSelections and CMP.LEM.frameSelections[frame]
+	local system = selection and selection.system
+	ok, name = pcall(function()
+		return system and system.GetSystemName and system.GetSystemName()
+	end)
+	if ok and type(name) == "string" and name ~= "" then
+		return name
+	end
+	return frame:GetName() or info.key
+end
+
+-- Other frames you can attach to: Edit Mode's own and LibEditMode add-on frames, named
+-- ones only (the name is what's saved), sorted by name.
+local externalCache, externalCacheTime
+
+function Anchors:ExternalTargets()
+	-- (the drag preview asks many times a second; the list barely changes)
+	local now = GetTime()
+	if externalCache and externalCacheTime and now - externalCacheTime < 1 then
+		return externalCache
+	end
+	local result, seen = {}, {}
+	local function Add(frame)
+		if type(frame) ~= "table" or seen[frame] or CMP.byFrame[frame] or type(frame.GetName) ~= "function" then
+			return
+		end
+		seen[frame] = true
+		local name = frame:GetName()
+		if type(name) == "string" and _G[name] == frame then
+			local info = self:External("frame:" .. name)
+			if info then
+				table.insert(result, info)
+			end
+		end
+	end
+	local systems = EditModeManagerFrame and EditModeManagerFrame.registeredSystemFrames
+	for _, frame in ipairs(systems or {}) do
+		Add(frame)
+	end
+	local selections = CMP.LEM and CMP.LEM.frameSelections
+	for frame in pairs(selections or {}) do
+		Add(frame)
+	end
+	table.sort(result, function(a, b) return self:ExternalName(a) < self:ExternalName(b) end)
+	externalCache, externalCacheTime = result, now
+	return result
+end
+
+-- Can `info` attach to `target` (no loop through our attachments or the frames' anchors)?
+function Anchors:CanAttach(info, target)
+	if not target or target == info or not target.frame then
+		return false
+	end
+	if CMP.byKey[target.key] and self:WouldCycle(info.key, target.key) then
+		return false
+	end
+	return not DependsOn(target.frame, info.frame)
+end
+
 function Anchors:TargetInfo(info)
-	local target = CMP.byKey[CMP:Get(info.key, "attachTo")]
+	local target = self:ResolveTarget(CMP:Get(info.key, "attachTo"))
 	if target and target ~= info and target.frame then
 		return target
 	end
@@ -262,6 +383,40 @@ function Anchors:IsControlled(info)
 	return self:TargetInfo(info) ~= nil or self:PinPoint(info) ~= nil
 end
 
+-- Sets the frame's anchor so its left and bottom edges land on whole screen pixels (a
+-- frame centered on another one of odd width would start half a pixel off, and the game
+-- then rounds its edges differently from the frames around it).
+local function SetPixelPoint(frame, point, relativeTo, relativePoint, x, y)
+	raw.ClearAllPoints(frame)
+	raw.SetPoint(frame, point, relativeTo, relativePoint, x, y)
+	local unit = CMP.PixelUnit(frame)
+	local ok, left, bottom = pcall(function()
+		return frame:GetLeft(), frame:GetBottom()
+	end)
+	if not ok or not unit or unit <= 0 or CMP.IsSecret(left) or CMP.IsSecret(bottom) or not left or not bottom then
+		return
+	end
+	local dx = left / unit - math.floor(left / unit + 0.5)
+	local dy = bottom / unit - math.floor(bottom / unit + 0.5)
+	if math.abs(dx) > 0.01 or math.abs(dy) > 0.01 then
+		raw.ClearAllPoints(frame)
+		raw.SetPoint(frame, point, relativeTo, relativePoint, x - dx * unit, y - dy * unit)
+	end
+end
+Anchors.SetPixelPoint = SetPixelPoint
+
+-- Is another frame attached to `key`?
+function Anchors:HasDependents(key)
+	for _, other in ipairs(CMP.frameInfos) do
+		if other.key ~= key and other.frame and CMP:Get(other.key, "attachTo") == key then
+			return true
+		end
+	end
+	return false
+end
+
+local gridAligned = {} -- key -> true while we keep an Edit Mode-placed frame on whole pixels
+
 -- Puts the frame back where the Edit Mode layout says, without calling Blizzard Lua.
 function Anchors:RestoreEditMode(info)
 	local frame = info.frame
@@ -276,6 +431,11 @@ function Anchors:RestoreEditMode(info)
 	end
 	local scale = frame:GetScale()
 	local a, b = systemInfo.anchorInfo, systemInfo.anchorInfo2
+	if gridAligned[info.key] and not b then
+		-- frames are attached to it: the same spot, moved onto whole pixels (see Apply)
+		SetPixelPoint(frame, a.point, a.relativeTo, a.relativePoint, a.offsetX / scale, a.offsetY / scale)
+		return
+	end
 	raw.ClearAllPoints(frame)
 	raw.SetPoint(frame, a.point, a.relativeTo, a.relativePoint, a.offsetX / scale, a.offsetY / scale)
 	if b then
@@ -291,15 +451,23 @@ function Anchors:Apply(info)
 	local key = info.key
 	local mode = CMP:Get(key, "attachTo")
 
-	local attached = CMP.byKey[mode] ~= nil and mode ~= key
+	local attached = mode ~= key and self:ResolveTarget(mode) ~= nil
 	local pinPoint = not attached and self:PinPoint(info)
 	if (not attached and not pinPoint) or CMP:IsManagedDefault(frame) then
-		if applied[key] then
-			applied[key] = nil
+		-- Placed by Edit Mode. When frames are attached to it, keep it on whole pixels: they
+		-- are, and a frame half a pixel off renders its edges a pixel apart from theirs.
+		local align = not CMP:IsManagedDefault(frame) and self:HasDependents(key)
+		if align then
+			-- every time: its size may have changed, and with it where its edges fall
+			gridAligned[key], applied[key] = true, true
+			self:RestoreEditMode(info)
+		elseif applied[key] then
+			gridAligned[key], applied[key] = nil, nil
 			self:RestoreEditMode(info)
 		end
 		return
 	end
+	gridAligned[key] = nil
 	if not CMP:CanTouch(frame) then
 		return
 	end
@@ -315,8 +483,7 @@ function Anchors:Apply(info)
 				return
 			end
 		end
-		raw.ClearAllPoints(frame)
-		raw.SetPoint(frame, pinPoint, UIParent, "BOTTOMLEFT", CMP.Snap(x * k, frame), CMP.Snap(y * k, frame))
+		SetPixelPoint(frame, pinPoint, UIParent, "BOTTOMLEFT", CMP.Snap(x * k, frame), CMP.Snap(y * k, frame))
 		applied[key] = true
 		return
 	end
@@ -380,14 +547,16 @@ function Anchors:Apply(info)
 			y = y + (tBottom - tTop) / 2 - (fBottom - fTop) / 2
 		end
 	end
-	raw.ClearAllPoints(frame)
-	raw.SetPoint(frame, point, target.frame, relativePoint, CMP.Snap(x * k, frame), CMP.Snap(y * k, frame))
+	SetPixelPoint(frame, point, target.frame, relativePoint, CMP.Snap(x * k, frame), CMP.Snap(y * k, frame))
 	applied[key] = true
 end
 
 -- A frame was shown or hidden: frames attached to it with "Take its place" move.
 function Anchors:OnVisibilityChanged(info)
 	if not CMP.ready then
+		return
+	end
+	if not info then
 		return
 	end
 	for _, other in ipairs(CMP.frameInfos) do
@@ -398,12 +567,128 @@ function Anchors:OnVisibilityChanged(info)
 end
 
 function Anchors:ApplyAll()
-	for _, info in ipairs(CMP.frameInfos) do
-		if info.frame then
-			CMP.Safe(self.Apply, self, info)
+	-- twice: a frame lined up on the pixel grid before the frame it's attached to moved
+	-- onto it would be off again
+	for _ = 1, 2 do
+		for _, info in ipairs(CMP.frameInfos) do
+			if info.frame then
+				CMP.Safe(self.Apply, self, info)
+			end
 		end
 	end
 	self:UpdateWidths()
+end
+
+---------------------------------------------------------------------------
+-- Drop zones
+---------------------------------------------------------------------------
+
+local DROP_DISTANCE = 24 -- UI units between edges that still count as "next to it"
+local DROP_OVERLAP = 8 -- how far it may overlap the other frame and still count
+
+-- Frames this one could attach to right now.
+function Anchors:DropTargets(info)
+	local result = {}
+	for _, other in ipairs(CMP.frameInfos) do
+		if other ~= info and other.frame then
+			table.insert(result, other)
+		end
+	end
+	for _, other in ipairs(self:ExternalTargets()) do
+		table.insert(result, other)
+	end
+	return result
+end
+
+-- Where a drop here would attach: { target, side, align } or nil. Shift: never.
+function Anchors:DropCandidate(info)
+	if IsShiftKeyDown() then
+		return nil
+	end
+	local fl, fb, fw, fh = self:VisibleRect(info.frame)
+	if not fl then
+		return nil
+	end
+	local fr, ft = fl + fw, fb + fh
+	local best, bestDistance
+	for _, target in ipairs(self:DropTargets(info)) do
+		local frame = target.frame
+		local visible = frame:IsVisible()
+		if not CMP.IsSecret(visible) and visible and self:CanAttach(info, target) then
+			local tl, tb, tw, th = self:VisibleRect(frame)
+			if tl and tw > 0 and th > 0 then
+				local tr, tt = tl + tw, tb + th
+				local overlapX = math.min(fr, tr) - math.max(fl, tl)
+				local overlapY = math.min(ft, tt) - math.max(fb, tb)
+				-- gap: the space between the two edges on that side (negative = overlapping); the
+				-- frame has to be on that side, give or take a few units of overlap
+				local function Consider(side, gap, along)
+					local distance = math.abs(gap)
+					if gap >= -DROP_OVERLAP and gap <= DROP_DISTANCE and along > -DROP_DISTANCE
+						and (not bestDistance or distance < bestDistance) then
+						best, bestDistance = { target = target, side = side }, distance
+					end
+				end
+				Consider("BELOW", tb - ft, overlapX)
+				Consider("ABOVE", fb - tt, overlapX)
+				Consider("RIGHT", fl - tr, overlapY)
+				Consider("LEFT", tl - fr, overlapY)
+				if best and best.target == target then
+					-- what lines up: the closest of start edges, centers and end edges
+					local s, c, e
+					if best.side == "BELOW" or best.side == "ABOVE" then
+						s, c, e = math.abs(fl - tl), math.abs((fl + fr) / 2 - (tl + tr) / 2), math.abs(fr - tr)
+					else
+						s, c, e = math.abs(ft - tt), math.abs((fb + ft) / 2 - (tb + tt) / 2), math.abs(fb - tb)
+					end
+					best.align = (c <= s and c <= e) and "CENTER" or (s <= e and "START" or "END")
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- The gap a drop gives: touching, or the gap it had when dropped on the same side of the
+-- same frame again.
+function Anchors:CandidateGap(info, candidate)
+	local key = info.key
+	if CMP:Get(key, "attachTo") == candidate.target.key and CMP:Get(key, "attachSide") == candidate.side then
+		return CMP:Get(key, "attachGap")
+	end
+	return 0
+end
+
+-- Where the frame would sit for a candidate (visible rect, UI units), for the preview.
+function Anchors:CandidateRect(info, candidate)
+	local fl, fb, fw, fh = self:VisibleRect(info.frame)
+	local tl, tb, tw, th = self:VisibleRect(candidate.target.frame)
+	if not fl or not tl then
+		return nil
+	end
+	local side, align = candidate.side, candidate.align
+	local gap = self:CandidateGap(info, candidate)
+	local left, bottom
+	if side == "BELOW" or side == "ABOVE" then
+		bottom = side == "BELOW" and (tb - fh - gap) or (tb + th + gap)
+		left = (align == "START" and tl) or (align == "END" and tl + tw - fw) or (tl + tw / 2 - fw / 2)
+	else
+		left = side == "RIGHT" and (tl + tw + gap) or (tl - fw - gap)
+		bottom = (align == "START" and tb + th - fh) or (align == "END" and tb) or (tb + th / 2 - fh / 2)
+	end
+	return left, bottom, fw, fh
+end
+
+local SIDE_TEXT = { BELOW = "below", ABOVE = "above", LEFT = "left of", RIGHT = "right of" }
+local ALIGN_TEXT = {
+	BELOW = { CENTER = "centered", START = "left edges lined up", END = "right edges lined up" },
+	LEFT = { CENTER = "centered", START = "tops lined up", END = "bottoms lined up" },
+}
+ALIGN_TEXT.ABOVE, ALIGN_TEXT.RIGHT = ALIGN_TEXT.BELOW, ALIGN_TEXT.LEFT
+
+function Anchors:DescribeCandidate(candidate)
+	return ("Attach %s %s, %s"):format(SIDE_TEXT[candidate.side], CMP:GetName(candidate.target.key),
+		ALIGN_TEXT[candidate.side][candidate.align])
 end
 
 -- Edit Mode drag and arrow keys.
@@ -415,11 +700,30 @@ function Anchors:OnUserMoved(info, how, keyName)
 	local mode = CMP:Get(key, "attachTo")
 
 	if how == "drag" then
+		local shift = IsShiftKeyDown()
+		-- 1. dropped in a drop zone: attach there, touching (or keeping the gap it had, when
+		--    dropped on the same side of the same frame)
+		local candidate = not shift and self:DropCandidate(info)
+		if candidate then
+			local target = candidate.target
+			local gap = self:CandidateGap(info, candidate)
+			CMP:SetQuiet(key, "attachTo", target.key)
+			CMP:SetQuiet(key, "attachSide", candidate.side)
+			CMP:SetQuiet(key, "attachAlign", candidate.align)
+			CMP:SetQuiet(key, "attachGap", gap)
+			CMP:SetQuiet(key, "attachOffset", 0)
+			self:ApplyAll()
+			self:UpdateWidths(true)
+			CMP:RefreshDialog(info)
+			CMP.Overlay:Refresh()
+			return
+		end
+		-- 2. Edit Mode's own snap put it against one of our frames: attach as it sits
 		local point, relativeTo, relativePoint = info.frame:GetPoint(1)
 		if type(relativeTo) == "string" then
 			relativeTo = _G[relativeTo]
 		end
-		local target = relativeTo and CMP.byFrame[relativeTo]
+		local target = not shift and relativeTo and CMP.byFrame[relativeTo]
 		if target and target ~= info and not self:WouldCycle(key, target.key) then
 			local side, align = DeriveAttachment(point, relativePoint)
 			if side then
@@ -439,9 +743,10 @@ function Anchors:OnUserMoved(info, how, keyName)
 			end
 		end
 		if mode ~= "none" then
-			-- Dragged away from its target: detach.
+			-- Dragged away from its target (or moved with Shift): detach.
 			CMP:SetQuiet(key, "attachTo", "none")
 			applied[key] = nil
+			CMP.Overlay:Flash(info.frame, "Detached")
 		end
 		if self:PinPoint(info) then
 			-- Keep growing from the new spot.
@@ -513,7 +818,15 @@ function Anchors:Hook(info)
 		CMP.Safe(self.OnResetPosition, self, info)
 		CMP.Session:Touch(info.key)
 	end)
+	CMP.HookMethod(frame, "OnDragStart", function()
+		-- the overlay previews drop zones while this is set (only if Blizzard let it move)
+		local moving = frame.isDragging
+		if CMP.IsSecret(moving) or moving ~= false then
+			self.dragging = info
+		end
+	end)
 	CMP.HookMethod(frame, "OnDragStop", function()
+		self.dragging = nil
 		CMP.Safe(self.OnUserMoved, self, info, "drag")
 		CMP.Session:Touch(info.key)
 	end)
@@ -591,7 +904,7 @@ function Anchors:ContentWidth(key)
 	if content then
 		return content.width
 	end
-	local info = CMP.byKey[key]
+	local info = self:ResolveTarget(key) -- (Match Width can match another Edit Mode frame too)
 	if not info or not info.frame then
 		return 0
 	end
@@ -711,14 +1024,27 @@ local prdMatched = false
 function Anchors:ApplyPRDWidth(info)
 	local frame = info.frame
 	local reference = self:ReferenceWidth(info)
+	-- Lined up with other frames (attached, or frames attached to it): whole pixels, like
+	-- them. Blizzard's width times the frame's scale is usually a fraction of a pixel.
+	local lined = self:TargetInfo(info) ~= nil or self:HasDependents(info.key)
 	local width
 	if reference then
 		width = (reference + CMP:Get(info.key, "widthAdjust")) * UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
 		prdMatched = true
-	elseif prdMatched then
+	elseif prdMatched or lined then
 		-- Same formula as Blizzard's UpdateBarWidth (Edit Mode's Bar Width setting).
 		width = (frame.defaultBarWidth or 200) * (frame.barWidthPercent or 100) / 100
-		prdMatched = false
+		prdMatched = lined -- (keep restoring Blizzard's exact width once it's no longer lined up)
+		if not lined then
+			if not CMP:CanTouch(frame) or math.abs(frame:GetWidth() - width) < 0.01 then
+				return
+			end
+			raw.SetWidth(frame, width)
+			for _, part in ipairs({ frame.HealthBarsContainer, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer }) do
+				raw.SetWidth(part, width)
+			end
+			return
+		end
 	else
 		return
 	end
@@ -732,6 +1058,13 @@ function Anchors:ApplyPRDWidth(info)
 	raw.SetWidth(frame, width)
 	for _, part in ipairs({ frame.HealthBarsContainer, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer }) do
 		raw.SetWidth(part, width)
+	end
+	-- A centered frame's edges moved with its width: back onto whole pixels, and the frames
+	-- attached to it with it. (Once: the width is now set, so this doesn't come back here.)
+	if not self.realigning then
+		self.realigning = true
+		CMP.Safe(self.ApplyAll, self)
+		self.realigning = false
 	end
 end
 

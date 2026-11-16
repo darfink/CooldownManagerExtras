@@ -93,6 +93,15 @@ function Layout:ApplyItemScale(info, item)
 	local viewer = info.frame
 	local fit = self.fit[viewer]
 	local size = fit and fit.size or (not self:IsGeometryLocked(info) and CMP:Get(info.key, "iconSize") or 0)
+	if size <= 0 and self:IsEngineActive(info) then
+		-- Edit Mode's Icon Size, rounded to whole screen pixels: at most UI scales Blizzard's
+		-- size is fractional (49.93 px), and the game then rounds each edge differently, so
+		-- borders and the icons next to them end up a pixel off.
+		local base = BaseWidth(item)
+		if base then
+			size = base * (viewer.iconScale or 1) * viewer:GetEffectiveScale() / UIParent:GetEffectiveScale()
+		end
+	end
 	local scale
 	if size > 0 then
 		local base = BaseWidth(item)

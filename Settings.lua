@@ -22,7 +22,7 @@ end
 
 -- Settings that show, hide or relabel other settings. Only these rebuild the panel;
 -- rebuilding on every change would drop an active slider drag.
-local PRDBarSettings, BuffBarSettings, SpacingSettings
+local PRDBarSettings, BuffBarSettings, SpacingSettings, MediaValues
 local STRUCTURAL = { align = true, sharedBorders = true, attachTo = true, style = true, barStyle = true, matchWidth = true, keybinds = true, healthColorMode = true, costColorMode = true }
 
 -- Settings that only apply because of the setting above them are indented under it, with a
@@ -75,7 +75,7 @@ end
 local function NotAttached(info)
 	return function(layoutName)
 		local target = CMP:Get(info.key, "attachTo", layoutName)
-		return CMP.byKey[target] == nil or target == info.key
+		return target == "none" or target == info.key or CMP.Anchors:ResolveTarget(target) == nil
 	end
 end
 
@@ -222,8 +222,8 @@ local function AttachSettings(info, list)
 		kind = Type.Dropdown,
 		name = "Attach To",
 		desc = "Keep this frame attached to another one. It follows that frame when it moves, resizes or hides.\n\n"
-			.. "Easiest: in Edit Mode, drag this frame against another one until it snaps. That attaches it. Drag it away to detach.\n\n"
-			.. "Arrow keys change the gap and offset while attached." .. LOCKED_NOTE,
+			.. "Easiest: in Edit Mode, drag this frame next to another one. A preview shows where it will attach; let go to attach it there. Drag it away to detach, or hold Shift while dragging to move it without attaching (Edit Mode's own Snap, if on, can still snap it).\n\n"
+			.. "Arrow keys change the gap and offset while attached.\n\nBesides the cooldown frames, any Edit Mode frame works: action bars, unit frames, the cast bar, and add-on frames that use Edit Mode." .. LOCKED_NOTE,
 		values = function()
 			local values = { Option("Nothing (Edit Mode)", "none") }
 			for _, other in ipairs(CMP.frameInfos) do
@@ -231,8 +231,19 @@ local function AttachSettings(info, list)
 					table.insert(values, Option(CMP:GetName(other.key), other.key))
 				end
 			end
+			local current = CMP:Get(info.key, "attachTo")
+			local listed = false
+			for _, other in ipairs(CMP.Anchors:ExternalTargets()) do
+				table.insert(values, Option("|cffb0b0b0" .. CMP:GetName(other.key) .. "|r", other.key))
+				listed = listed or other.key == current
+			end
+			if type(current) == "string" and current:match("^frame:") and not listed then
+				-- saved, but not there now (its add-on is off, ...)
+				table.insert(values, Option(current:sub(7) .. " (missing)", current))
+			end
 			return values
 		end,
+		height = 320,
 		disabled = function()
 			return info.frame ~= nil and CMP:IsManagedDefault(info.frame)
 		end,
@@ -245,7 +256,8 @@ local function AttachSettings(info, list)
 			-- Detaching: keep growing from where the frame is now, not from an old spot.
 			CMP.Anchors:RecordPin(info)
 		end
-		if CMP.byKey[value] and CMP.Anchors:WouldCycle(info.key, value) then
+		local target = value ~= "none" and CMP.Anchors:ResolveTarget(value)
+		if target and info.frame and not CMP.Anchors:CanAttach(info, target) then
 			CMP:Print(("Can't attach %s to %s: %s is already attached to it."):format(
 				CMP:GetName(info.key), CMP:GetName(value), CMP:GetName(value)))
 			return
@@ -338,7 +350,7 @@ end
 
 local function IconSettings(info, list)
 	local isBars = info.kind == "bars"
-	local collapsed = Section(info, list, "icons", isBars and "Bar Icons" or "Icon Look", false)
+	local collapsed = Section(info, list, "icons", isBars and "Icon" or "Icons", false)
 	table.insert(list, Bind(info, "style", {
 		kind = Type.Dropdown,
 		name = "Icon Style",
@@ -482,7 +494,7 @@ end
 
 -- Tracked Bars: the bar next to the icon (the icon has its own section).
 BuffBarSettings = function(info, list)
-	local collapsed = Section(info, list, "bars", "Bar Look", false)
+	local collapsed = Section(info, list, "bars", "Bar", false)
 	table.insert(list, Bind(info, "barStyle", {
 		kind = Type.Dropdown,
 		name = "Bar Style",
@@ -508,6 +520,14 @@ BuffBarSettings = function(info, list)
 	}))
 	table.insert(list, ColorSetting(info, "barBorderColor", INDENT .. "Color", nil, notSquare))
 	table.insert(list, ColorSetting(info, "barBackground", INDENT .. "Background", "Color behind the empty part of each bar.", notSquare))
+	table.insert(list, Bind(info, "barTexture", {
+		kind = Type.Dropdown,
+		name = "Bar Texture",
+		desc = "Default keeps Blizzard's.",
+		values = MediaValues("statusbar"),
+		height = 320,
+		hidden = collapsed,
+	}))
 end
 
 -- Spacing between icons, in screen pixels between the visible icons.
@@ -582,7 +602,7 @@ local OUTLINES = {
 	Option("Thick Outline", "THICKOUTLINE"),
 }
 
-local function MediaValues(kind)
+MediaValues = function(kind)
 	return function()
 		local values = { Option(DEFAULT or "Default", "default") }
 		for _, entry in ipairs(CMP.Media:List(kind)) do
@@ -730,9 +750,10 @@ local function PowerBarSettings(info, list)
 	}))
 end
 
+-- Fonts and text sizes. Textures live with the bar they belong to (Bar / Health Bar /
+-- Power Bar sections), keybind text has its own section.
 local function TextSettings(info, list)
-	-- the Personal Resource Display's textures are in its Health Bar / Power Bar sections
-	local collapsed = Section(info, list, "text", info.kind == "prd" and "Text" or "Text & Textures", false)
+	local collapsed = Section(info, list, "text", "Text", false)
 	local lsmNote = CMP.Media:LSM() and "" or "\n\nInstall SharedMedia (or any addon that ships LibSharedMedia) for more fonts."
 	table.insert(list, Bind(info, "font", {
 		kind = Type.Dropdown,
@@ -773,6 +794,29 @@ local function TextSettings(info, list)
 		end
 		SizeSlider("timerSize", "Timer Size", "Size of the cooldown countdown numbers.")
 		SizeSlider("countSize", "Count Size", "Size of charge and stack counts.")
+	else
+		SizeSlider("textSize", "Text Size")
+	end
+end
+
+-- Keybind text on cooldown icons.
+local function KeybindSettings(info, list)
+	local collapsed = Section(info, list, "keybinds", "Keybinds", false)
+	local function SizeSlider(field, name, desc)
+		table.insert(list, Bind(info, field, {
+			kind = Type.Slider,
+			name = name,
+			desc = desc,
+			minValue = 0,
+			maxValue = 40,
+			valueStep = 1,
+			formatter = function(value)
+				return value == 0 and (DEFAULT or "Default") or Units(value)
+			end,
+			hidden = collapsed,
+		}))
+	end
+	do
 		table.insert(list, Bind(info, "keybinds", {
 			kind = Type.Checkbox,
 			name = "Show Keybinds",
@@ -794,17 +838,6 @@ local function TextSettings(info, list)
 				Option("Bottom Right", "BOTTOMRIGHT"),
 			},
 			hidden = keybindsOff,
-		}))
-	elseif info.kind == "prd" then
-		SizeSlider("textSize", "Text Size")
-	else
-		SizeSlider("textSize", "Text Size")
-		table.insert(list, Bind(info, "barTexture", {
-			kind = Type.Dropdown,
-			name = "Bar Texture",
-			values = MediaValues("statusbar"),
-			height = 320,
-			hidden = collapsed,
 		}))
 	end
 end
@@ -843,6 +876,9 @@ function Settings:Register()
 				BuffBarSettings(info, list)
 			end
 			TextSettings(info, list)
+			if info.kind == "icons" then
+				KeybindSettings(info, list)
+			end
 			LEM:AddSystemSettings(info.systemID, list, info.subSystemID)
 		end
 	end

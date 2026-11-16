@@ -9,6 +9,8 @@ local CMP = ns.CMP
 --    icons appear:  [|>>]  [<|>]  [<<|]. A second badge at the bottom shows where extra
 --    rows go. Blue outline = set by Cooldown Manager Extras; Blizzard's default is shown
 --    (grey) only on the selected frame.
+--  * Drop preview, while dragging: near another frame's edge, a ghost of where the frame
+--    will attach, the edge it attaches to, and what lines up ("Attach below X, centered").
 --  * Attachment: white = attached by Cooldown Manager Extras, gold = a plain Edit Mode snap.
 --    A seam marks the shared edge and a dot the point where the frames meet (center,
 --    left or right edge = what lines up). A line connects the two when there's a gap.
@@ -111,7 +113,51 @@ local function Arrowhead(x, y, dx, dy, color, alpha, size)
 end
 
 local function IsSystemFrame(f)
-	return type(f) == "table" and (f.system ~= nil or CMP.byFrame[f] ~= nil)
+	return type(f) == "table" and (f.system ~= nil or CMP.byFrame[f] ~= nil or CMP.Anchors.externalByFrame[f] ~= nil)
+end
+
+-- While a frame is dragged: where it will attach if dropped now.
+function Overlay:DrawDropPreview(info)
+	local candidate = CMP.Anchors:DropCandidate(info)
+	if not candidate then
+		self.preview = IsShiftKeyDown() and "Shift: move without attaching" or nil
+		return
+	end
+	local left, bottom, width, height = CMP.Anchors:CandidateRect(info, candidate)
+	if not left then
+		return
+	end
+	-- ghost of the frame where it will sit
+	Rect(left, bottom, width, height, COLOR_PLUS, 0.22)
+	local right, top = left + width, bottom + height
+	Stroke(left, bottom, right, bottom, COLOR_ATTACH, 1, 0.9)
+	Stroke(left, top, right, top, COLOR_ATTACH, 1, 0.9)
+	Stroke(left, bottom, left, top, COLOR_ATTACH, 1, 0.9)
+	Stroke(right, bottom, right, top, COLOR_ATTACH, 1, 0.9)
+	-- the target's edge it attaches to, and the point that lines up
+	local tl, tb, tw, th = CMP.Anchors:VisibleRect(candidate.target.frame)
+	if tl then
+		local side, align = candidate.side, candidate.align
+		local tr, tt = tl + tw, tb + th
+		local x, y
+		if side == "BELOW" or side == "ABOVE" then
+			y = side == "BELOW" and tb or tt
+			Stroke(tl, y, tr, y, COLOR_PLUS, 4, 1)
+			x = (align == "START" and math.max(tl, left)) or (align == "END" and math.min(tr, right)) or (tl + tw / 2)
+		else
+			x = side == "RIGHT" and tr or tl
+			Stroke(x, tb, x, tt, COLOR_PLUS, 4, 1)
+			y = (align == "START" and math.min(tt, top)) or (align == "END" and math.max(tb, bottom)) or (tb + th / 2)
+		end
+		Dot(x, y, COLOR_ATTACH, 1, 9)
+	end
+	self.preview = CMP.Anchors:DescribeCandidate(candidate)
+end
+
+-- A short note on a frame ("Detached"), shown for a moment.
+function Overlay:Flash(systemFrame, text)
+	self.flash = { frame = systemFrame, text = text, ["until"] = GetTime() + 1.5 }
+	self:Refresh()
 end
 
 function Overlay:DrawConnector(systemFrame, selected)
@@ -272,11 +318,24 @@ function Overlay:Describe(systemFrame)
 end
 
 function Overlay:DrawLabel(selected)
-	if not selected or not selected:IsVisible() then
+	local dragging = CMP.Anchors.dragging
+	local flash = self.flash
+	if flash and GetTime() > flash["until"] then
+		self.flash, flash = nil, nil
+	end
+	local anchor, text
+	if dragging and self.preview then
+		anchor, text = dragging.frame, self.preview
+	elseif flash then
+		anchor, text = flash.frame, flash.text
+	elseif selected and selected:IsVisible() then
+		anchor, text = selected, self:Describe(selected)
+	end
+	if not anchor or not text then
 		label:Hide()
 		return
 	end
-	local text = self:Describe(selected)
+	selected = anchor
 	if not text then
 		label:Hide()
 		return
@@ -305,6 +364,11 @@ function Overlay:Draw()
 			local isSelected = info.frame == selected
 			CMP.Safe(self.DrawGrowth, self, info, isSelected)
 		end
+	end
+	self.preview = nil
+	local dragging = CMP.Anchors.dragging
+	if dragging and dragging.frame then
+		CMP.Safe(self.DrawDropPreview, self, dragging)
 	end
 	CMP.Safe(self.DrawLabel, self, selected)
 
@@ -359,5 +423,8 @@ function Overlay:Init()
 	end)
 	CMP.LEM:RegisterCallback("exit", function()
 		frame:Hide()
+		-- Edit Mode can end a drag without OnDragStop (leaving mid-drag)
+		CMP.Anchors.dragging = nil
+		Overlay.flash, Overlay.preview = nil, nil
 	end)
 end

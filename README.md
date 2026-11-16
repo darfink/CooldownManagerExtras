@@ -13,8 +13,10 @@ Made for WoW Forever.
 
 - **Layout:** center a row, or let it grow from its left or right edge. Rows of buffs
   close the gaps of inactive icons.
-- **Anchoring:** attach a viewer to another viewer or to the Personal Resource Display,
-  on any side, with a gap. Snapping two frames together in Edit Mode attaches them. An
+- **Anchoring:** attach a viewer to another viewer, the Personal Resource Display or any
+  other Edit Mode frame (action bars, unit frames, cast bar, add-on frames), on any side,
+  with a gap. In Edit Mode, drag a frame next to another one: a preview shows where it
+  will attach, and letting go attaches it. Hold Shift to move it without attaching. An
   attachment stays when its target hides.
 - **Width matching:** make a viewer, the Tracked Bars or the Personal Resource Display as
   wide as another one.

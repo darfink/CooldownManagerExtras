@@ -338,7 +338,11 @@ local function CleanSetting(field, value)
 	elseif rule == "string" then
 		return type(value) == "string" and #value <= 200 and value or nil
 	elseif rule == "frame" then
-		return type(value) == "string" and (value == "none" or CMP.byKey[value] ~= nil) and value or nil
+		if type(value) ~= "string" then
+			return nil
+		end
+		local named = value:match("^frame:([%a_][%w_]*)$") -- another Edit Mode frame, by name
+		return (value == "none" or CMP.byKey[value] ~= nil or (named and #named <= 80)) and value or nil
 	elseif type(rule[1]) == "number" then
 		if type(value) ~= "number" then
 			return nil
@@ -408,12 +412,23 @@ end
 ---------------------------------------------------------------------------
 
 -- The settings in effect now, as text.
+-- The current settings, with the gap of every attached frame written out (see Inspect).
+function Share:ExportFrames()
+	local frames = CMP.Profiles:Snapshot()
+	for _, settings in pairs(frames) do
+		if type(settings) == "table" and settings.attachTo and settings.attachTo ~= "none" and settings.attachGap == nil then
+			settings.attachGap = CMP.defaults.attachGap
+		end
+	end
+	return frames
+end
+
 function Share:Export()
 	local data = {
 		addon = "CooldownManagerExtras",
 		version = VERSION,
 		name = CMP.Profiles:ActiveName() or CMP.activeLayout,
-		frames = CMP.Profiles:Snapshot(),
+		frames = Share:ExportFrames(),
 		spells = CMP.Copy(CMP.db.spells or {}),
 	}
 	return Pack(Serialize(data))
@@ -436,7 +451,9 @@ function Share:Read(text)
 		return nil, "That export is from a newer version of Cooldown Manager Extras; update the addon first."
 	end
 	local frames, frameCount = CleanFrames(data.frames)
-	CMP.MigratePRD(frames.PRD) -- exports from 0.1: one Bar Texture for all bars
+	-- Exports always write the gap of an attached frame; one without it is from 0.1/0.2,
+	-- whose default gap was 2. 0.1 also had one Bar Texture for all PRD bars.
+	CMP.MigrateFrames(frames, true)
 	local spells, spellCount = CleanSpells(data.spells)
 	return {
 		name = type(data.name) == "string" and data.name:sub(1, 40) or nil,
