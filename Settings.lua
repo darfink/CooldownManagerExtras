@@ -681,7 +681,7 @@ function Settings:Register()
 	local cooldownSystem = Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
 	local indices = Enum.EditModeCooldownViewerSystemIndices
 	for _, info in ipairs(CMP.frameInfos) do
-		local list = { { kind = Type.Divider, name = "Cooldown Manager Plus" } }
+		local list = { { kind = Type.Divider, name = "Cooldown Manager Extras" } }
 		info.header = list[1]
 		if info.kind == "prd" then
 			info.systemID = Enum.EditModeSystem and Enum.EditModeSystem.PersonalResourceDisplay
@@ -722,7 +722,7 @@ end
 
 function Settings:UpdateHeader()
 	local profile = CMP.Profiles:ActiveName()
-	local name = profile and ("Cooldown Manager Plus  |cff4fa3ff(%s)|r"):format(profile) or "Cooldown Manager Plus"
+	local name = profile and ("Cooldown Manager Extras  |cff4fa3ff(%s)|r"):format(profile) or "Cooldown Manager Extras"
 	for _, info in ipairs(CMP.frameInfos) do
 		if info.header then
 			info.header.name = name
@@ -850,7 +850,7 @@ function Settings:AddDragHandle(extension)
 	end)
 	handle:SetScript("OnEnter", function()
 		GameTooltip:SetOwner(handle, "ANCHOR_TOP")
-		GameTooltip:SetText("Cooldown Manager Plus", 1, 1, 1)
+		GameTooltip:SetText("Cooldown Manager Extras", 1, 1, 1)
 		GameTooltip:AddLine("Drag to move the settings window. The - button in the corner of the window above hides this panel. When the panel is taller than the screen, scroll it with the mouse wheel.", nil, nil, nil, true)
 		GameTooltip:Show()
 	end)
@@ -910,7 +910,7 @@ function Settings:CreateToggle()
 	end)
 	toggle:SetScript("OnEnter", function()
 		GameTooltip:SetOwner(toggle, "ANCHOR_TOP")
-		GameTooltip:SetText("Cooldown Manager Plus", 1, 1, 1)
+		GameTooltip:SetText("Cooldown Manager Extras", 1, 1, 1)
 		GameTooltip:AddLine(Settings.collapsed and "Show the extra settings panel." or "Hide the extra settings panel while you edit.", nil, nil, nil, true)
 		GameTooltip:Show()
 	end)

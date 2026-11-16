@@ -1,7 +1,7 @@
 local _, ns = ...
 local CMP = ns.CMP
 
--- Profiles: named, account-wide sets of all Cooldown Manager Plus settings, so a setup can
+-- Profiles: named, account-wide sets of all Cooldown Manager Extras settings, so a setup can
 -- be shared between characters and talent groups.
 --
 -- Without a profile (the default), settings belong to the current Edit Mode layout, like

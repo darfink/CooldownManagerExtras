@@ -7,9 +7,9 @@ local CMP = ns.CMP
 --  * Growth: a small dark badge just inside the edge of each cooldown viewer, at the point
 --    that stays put (left end, middle or right end), with white arrows pointing where new
 --    icons appear:  [|>>]  [<|>]  [<<|]. A second badge at the bottom shows where extra
---    rows go. Blue outline = set by Cooldown Manager Plus; Blizzard's default is shown
+--    rows go. Blue outline = set by Cooldown Manager Extras; Blizzard's default is shown
 --    (grey) only on the selected frame.
---  * Attachment: white = attached by Cooldown Manager Plus, gold = a plain Edit Mode snap.
+--  * Attachment: white = attached by Cooldown Manager Extras, gold = a plain Edit Mode snap.
 --    A seam marks the shared edge and a dot the point where the frames meet (center,
 --    left or right edge = what lines up). A line connects the two when there's a gap.
 -- Lines have a dark outline so they read on any background.

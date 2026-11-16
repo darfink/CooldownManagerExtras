@@ -193,7 +193,7 @@ local function Unpack(text)
 	elseif text:sub(1, #PREFIX_PLAIN) == PREFIX_PLAIN then
 		return Decode64(text:sub(#PREFIX_PLAIN + 1))
 	end
-	error("not a Cooldown Manager Plus export")
+	error("not a Cooldown Manager Extras export")
 end
 
 ---------------------------------------------------------------------------
@@ -354,7 +354,7 @@ end
 -- The settings in effect now, as text.
 function Share:Export()
 	local data = {
-		addon = "CooldownManagerPlus",
+		addon = "CooldownManagerExtras",
 		version = VERSION,
 		name = CMP.Profiles:ActiveName() or CMP.activeLayout,
 		frames = CMP.Profiles:Snapshot(),
@@ -373,11 +373,11 @@ function Share:Read(text)
 		local message = tostring(data):gsub("^.-:%d+: ", "")
 		return nil, "Can't read that: " .. message .. "."
 	end
-	if type(data) ~= "table" or data.addon ~= "CooldownManagerPlus" or type(data.version) ~= "number" then
-		return nil, "That's not a Cooldown Manager Plus export."
+	if type(data) ~= "table" or data.addon ~= "CooldownManagerExtras" or type(data.version) ~= "number" then
+		return nil, "That's not a Cooldown Manager Extras export."
 	end
 	if data.version > VERSION then
-		return nil, "That export is from a newer version of Cooldown Manager Plus; update the addon first."
+		return nil, "That export is from a newer version of Cooldown Manager Extras; update the addon first."
 	end
 	local frames, frameCount = CleanFrames(data.frames)
 	local spells, spellCount = CleanSpells(data.spells)

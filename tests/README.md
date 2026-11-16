@@ -9,7 +9,7 @@ luajit tests/run.lua lockouts   # only tests whose name contains "lockouts"
 luajit tests/run.lua -v         # also print the failure line of known-bug tests
 ```
 
-The runner loads the addon through `CooldownManagerPlus.toc` (read at run time, so new files are
+The runner loads the addon through `CooldownManagerExtras.toc` (read at run time, so new files are
 picked up), fires `ADDON_LOADED`, `PLAYER_LOGIN` and `PLAYER_ENTERING_WORLD`, runs every
 `tests/cases/*.lua`, prints `PASS` / `FAIL` / `KNOWN BUG` per test and a summary, and exits non-zero
 on any failure. Every test boots a fresh client and addon.
@@ -48,7 +48,7 @@ T.test("what it checks", function(H, T)
 end)
 ```
 
-`T.test(name, opts, fn)` takes boot options as `opts`: `saved` (value of `CooldownManagerPlusDB`
+`T.test(name, opts, fn)` takes boot options as `opts`: `saved` (value of `CooldownManagerExtrasDB`
 before load), `setup = function(H)` (runs after Blizzard's frames exist, before the addon loads),
 `combat = true`, `viewers = {...}`, `prd = false`.
 

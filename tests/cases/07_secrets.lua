@@ -33,8 +33,8 @@ local function refreshEverything(H)
 	H.fireEvent("PLAYER_TARGET_CHANGED")
 	H.flush()
 	H.advance(1)
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("probe")
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("status")
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("probe")
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("status")
 end
 
 local function secretAura(H)

@@ -67,7 +67,7 @@ local function AddMenu(owner, rootDescription)
 	end
 
 	rootDescription:CreateDivider()
-	rootDescription:CreateTitle("Cooldown Manager Plus")
+	rootDescription:CreateTitle("Cooldown Manager Extras")
 	SpellMenu:AddStyleEntries(rootDescription, spellID)
 end
 

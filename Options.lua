@@ -1,7 +1,7 @@
 local _, ns = ...
 local CMP = ns.CMP
 
--- Options -> AddOns -> Cooldown Manager Plus. Only things that don't belong to one frame
+-- Options -> AddOns -> Cooldown Manager Extras. Only things that don't belong to one frame
 -- in Edit Mode: profiles, and sharing them (import / export, Share.lua). Built from Blizzard's own templates so it looks native.
 
 local Options = {}
@@ -40,7 +40,7 @@ function Options:Build()
 	panel:Hide()
 	self.panel = panel
 
-	local title = Label(panel, "Cooldown Manager Plus", "GameFontNormalLarge")
+	local title = Label(panel, "Cooldown Manager Extras", "GameFontNormalLarge")
 	title:SetPoint("TOPLEFT", 16, -16)
 	local intro = Label(panel, "Most settings live in Edit Mode: open it and select a cooldown viewer or the Personal Resource Display. Per-spell borders: right-click a spell in the Cooldown Settings window.", "GameFontHighlightSmall")
 	intro:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
@@ -294,7 +294,7 @@ function Options:Build()
 		end
 	end
 
-	self.category = Settings.RegisterCanvasLayoutCategory(panel, "Cooldown Manager Plus")
+	self.category = Settings.RegisterCanvasLayoutCategory(panel, "Cooldown Manager Extras")
 	Settings.RegisterAddOnCategory(self.category)
 end
 

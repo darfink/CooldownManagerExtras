@@ -1,4 +1,4 @@
--- Offline mock of the parts of the WoW client API that Cooldown Manager Plus (and the bundled
+-- Offline mock of the parts of the WoW client API that Cooldown Manager Extras (and the bundled
 -- LibEditMode) call. Written by reading what the addon calls; it is not a general emulator.
 --
 -- Rules of this file:
@@ -20,7 +20,7 @@ end
 
 local OPTIONAL = {
 	-- probed by the addon with `x and x(...)` / `if x then`
-	CooldownManagerPlusDB = true,
+	CooldownManagerExtrasDB = true,
 	CallErrorHandler = false, -- defined below (modern retail has it)
 	IsAddOnLoaded = true, -- removed from the modern client, only a fallback in the addon
 	GetNumSpecGroups = true,

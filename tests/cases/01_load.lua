@@ -19,7 +19,7 @@ T.test("loads in the .toc order and sees every file", function(H, T)
 		"Lockouts", "Mana", "Settings", "SpellMenu", "Options", "Diagnostics", "Masque" }) do
 		T.truthy(CMP[name], "CMP." .. name .. " missing: its file did not load")
 	end
-	T.eq(_G.CooldownManagerPlus, CMP)
+	T.eq(_G.CooldownManagerExtras, CMP)
 end)
 
 T.test("a second boot with saved data keeps it and fills in missing tables", { saved = { version = 1, layouts = { Modern = { Essential = { style = "square" } } } } }, function(H, T)
@@ -31,34 +31,34 @@ T.test("a second boot with saved data keeps it and fills in missing tables", { s
 	end
 end)
 
-T.test("slash command /cmp is registered", function(H, T)
-	T.eq(_G.SLASH_COOLDOWNMANAGERPLUS1, "/cmp")
-	T.eq(type(_G.SlashCmdList.COOLDOWNMANAGERPLUS), "function")
+T.test("slash command /cme is registered", function(H, T)
+	T.eq(_G.SLASH_COOLDOWNMANAGEREXTRAS1, "/cme")
+	T.eq(type(_G.SlashCmdList.COOLDOWNMANAGEREXTRAS), "function")
 end)
 
-T.test("/cmp help (and unknown words) print the command list", function(H, T)
-	local slash = _G.SlashCmdList.COOLDOWNMANAGERPLUS
+T.test("/cme help (and unknown words) print the command list", function(H, T)
+	local slash = _G.SlashCmdList.COOLDOWNMANAGEREXTRAS
 	slash("help")
-	T.truthy(T.printed(H, "/cmp probe"), "help lists /cmp probe")
-	T.truthy(T.printed(H, "/cmp blocked"), "help lists /cmp blocked")
-	T.truthy(T.printed(H, "/cmp reset"), "help lists /cmp reset")
+	T.truthy(T.printed(H, "/cme probe"), "help lists /cme probe")
+	T.truthy(T.printed(H, "/cme blocked"), "help lists /cme blocked")
+	T.truthy(T.printed(H, "/cme reset"), "help lists /cme reset")
 	H.output = {}
 	slash("")
 	T.truthy(T.printed(H, "Settings live in Edit Mode"))
 end)
 
-T.test("/cmp probe reports 'No active tracked auras' when nothing is tracked", function(H, T)
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("probe")
+T.test("/cme probe reports 'No active tracked auras' when nothing is tracked", function(H, T)
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("probe")
 	T.truthy(T.printed(H, "Aura probe"))
 	T.truthy(T.printed(H, "No active tracked auras"))
 end)
 
-T.test("/cmp probe lists an aura on a Tracked Buffs item, in and out of combat", function(H, T)
+T.test("/cme probe lists an aura on a Tracked Buffs item, in and out of combat", function(H, T)
 	local item = H.viewers.BuffIcon:AddItem({ spellID = 17, linkedSpellID = 6788 })
 	H.spells[6788] = { name = "Weakened Soul" }
 	local aura = H.addAura("player", { spellId = 6788, isHarmful = true, duration = 15, expirationTime = H.now + 15 })
 	H.setItemAura(item, aura)
-	local slash = _G.SlashCmdList.COOLDOWNMANAGERPLUS
+	local slash = _G.SlashCmdList.COOLDOWNMANAGEREXTRAS
 	slash("probe")
 	T.truthy(T.printed(H, "Weakened Soul"), "names the linked spell")
 	T.truthy(T.printed(H, "instance readable"), "reports readability")
@@ -70,12 +70,12 @@ T.test("/cmp probe lists an aura on a Tracked Buffs item, in and out of combat",
 	T.truthy(T.printed(H, "Aura probe (in combat"), "header still printed")
 end)
 
-T.test("/cmp blocked lists recorded ADDON_ACTION_BLOCKED events and 'blocked clear' forgets them", function(H, T)
-	local slash = _G.SlashCmdList.COOLDOWNMANAGERPLUS
+T.test("/cme blocked lists recorded ADDON_ACTION_BLOCKED events and 'blocked clear' forgets them", function(H, T)
+	local slash = _G.SlashCmdList.COOLDOWNMANAGEREXTRAS
 	slash("blocked")
 	T.truthy(T.printed(H, "No blocked actions recorded"))
 	H.fireEvent("ADDON_ACTION_BLOCKED", "SomeOtherAddon", "SetPoint()")
-	H.fireEvent("ADDON_ACTION_FORBIDDEN", "CooldownManagerPlus", "ClearAllPoints()")
+	H.fireEvent("ADDON_ACTION_FORBIDDEN", "CooldownManagerExtras", "ClearAllPoints()")
 	T.eq(#H.CMP.db.blocked, 2)
 	H.output = {}
 	slash("blocked")
@@ -95,17 +95,17 @@ T.test("blocked-action log keeps only the newest 50 entries", function(H, T)
 	T.eq(H.CMP.db.blocked[1].addon, "Addon11")
 end)
 
-T.test("/cmp status prints one line per frame", function(H, T)
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("status")
+T.test("/cme status prints one line per frame", function(H, T)
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("status")
 	T.truthy(T.printed(H, "layout:"))
 	T.truthy(T.printed(H, "Essential: frame=yes"))
 	T.truthy(T.printed(H, "PRD: frame=yes"))
 end)
 
-T.test("/cmp reset clears the active layout's settings", function(H, T)
+T.test("/cme reset clears the active layout's settings", function(H, T)
 	local CMP = H.CMP
 	CMP:Set("Essential", "style", "square")
 	T.eq(CMP:Get("Essential", "style"), "square")
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("reset")
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("reset")
 	T.eq(CMP:Get("Essential", "style"), "blizzard")
 end)

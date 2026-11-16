@@ -200,10 +200,10 @@ T.test("timers: removed early and put on again right away = a new debuff, timed 
 	T.truthy(overlay(item, H):IsShown(), "still timed after the old one would have ended")
 end)
 
-T.test("timers: /cmp timers reports without raising", function(H, T)
+T.test("timers: /cme timers reports without raising", function(H, T)
 	estimateRunning(H)
 	H.CMP.Timers:Report()
-	_G.SlashCmdList.COOLDOWNMANAGERPLUS("timers")
+	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("timers")
 	T.truthy(true)
 end)
 

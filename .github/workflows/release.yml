@@ -1,0 +1,31 @@
+name: Release
+
+# Push a tag (e.g. v0.1.0) to build the add-on and upload it to CurseForge and GitHub
+# Releases. The version in the .toc comes from the tag (## Version: @project-version@).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub release
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y luajit
+      - run: luajit tests/run.lua
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changelog is built from the git history
+      - uses: BigWigsMods/packager@v2

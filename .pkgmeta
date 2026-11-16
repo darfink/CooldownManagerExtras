@@ -1,0 +1,6 @@
+package-as: CooldownManagerExtras
+
+ignore:
+  - tests
+  - README.md
+  - .github

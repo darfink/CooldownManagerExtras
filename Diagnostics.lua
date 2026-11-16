@@ -4,8 +4,8 @@ local CMP = ns.CMP
 -- Records "Interface action failed because of an AddOn" (ADDON_ACTION_BLOCKED /
 -- ADDON_ACTION_FORBIDDEN). The game names the addon it blames and the protected function
 -- that was refused. Kept in our saved variables (last 50), so it survives /reload:
---   /cmp blocked        list them
---   /cmp blocked clear  forget them
+--   /cme blocked        list them
+--   /cme blocked clear  forget them
 -- For the full story (which code tainted what), turn on the game's taint log:
 --   /console taintLog 1   -> World of Warcraft/_forever_/Logs/taint.log after /reload
 
@@ -16,7 +16,7 @@ local MAX = 50
 local pending = {} -- before our saved variables load
 
 local function Store()
-	local db = _G.CooldownManagerPlusDB
+	local db = _G.CooldownManagerExtrasDB
 	if type(db) ~= "table" then
 		return pending
 	end
@@ -70,7 +70,7 @@ function Diagnostics:Print(clear)
 	end
 end
 
--- /cmp probe: what Blizzard's Tracked Buffs / Bars have for each active aura, and whether
+-- /cme probe: what Blizzard's Tracked Buffs / Bars have for each active aura, and whether
 -- addons may read it right now (in combat the game hides some auras from addons).
 local function Show(value)
 	if CMP.IsSecret(value) then -- first: testing a hidden value itself is an error

@@ -4,7 +4,7 @@ local Mock = require("mock.wow")
 local Blizzard = require("mock.blizzard")
 
 local Harness = {}
-local ADDON_NAME = "CooldownManagerPlus"
+local ADDON_NAME = "CooldownManagerExtras"
 
 local function readFile(path)
 	local f = io.open(path, "rb")
@@ -82,7 +82,7 @@ end
 -- opts:
 --   viewers   list of viewer keys to create (default all four); PRD = false to skip it
 --   setup     function(H) run after Blizzard frames exist, before the addon loads
---   saved     table assigned to CooldownManagerPlusDB before ADDON_LOADED
+--   saved     table assigned to CooldownManagerExtrasDB before ADDON_LOADED
 --   login     false = stop after loading files (no events)
 --   entering  false = skip PLAYER_ENTERING_WORLD
 --   combat    true = InCombatLockdown() is true from the start
@@ -103,7 +103,7 @@ function Harness.boot(root, opts)
 	if opts.combat then H.inCombat = true end
 	if opts.setup then opts.setup(H) end
 	if opts.saved then
-		rawset(_G, "CooldownManagerPlusDB", opts.saved)
+		rawset(_G, "CooldownManagerExtrasDB", opts.saved)
 	end
 
 	local ns = {}

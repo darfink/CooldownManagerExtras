@@ -22,7 +22,7 @@ T.test("Settings:Register adds settings for each cooldown viewer and the PRD", f
 	for key, index in pairs(INDICES) do
 		local list = lib.subSystemSettings[CooldownViewer] and lib.subSystemSettings[CooldownViewer][index]
 		T.truthy(list and #list > 5, key .. " has registered settings")
-		T.eq(list[1].name, "Cooldown Manager Plus", key .. " starts with our header divider")
+		T.eq(list[1].name, "Cooldown Manager Extras", key .. " starts with our header divider")
 		for _, want in ipairs({ "Grow From", "Attach To", "Font" }) do
 			T.truthy(hasName(list, want), key .. " lists '" .. want .. "'")
 		end

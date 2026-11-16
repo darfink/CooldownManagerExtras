@@ -1,8 +1,8 @@
--- Offline test runner for Cooldown Manager Plus.
+-- Offline test runner for Cooldown Manager Extras.
 --
 --   cd <addon root> && luajit tests/run.lua [-v] [name filter]
 --
--- Loads the addon through CooldownManagerPlus.toc into a mock WoW client (tests/mock) and runs
+-- Loads the addon through CooldownManagerExtras.toc into a mock WoW client (tests/mock) and runs
 -- every tests/cases/*.lua. Exit status is non-zero when any test fails.
 
 local script = arg and arg[0] or "tests/run.lua"

@@ -27,7 +27,7 @@ local NATIVE_SWIPE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 
 local overlays = setmetatable({}, { __mode = "k" }) -- item -> our Cooldown frame
-local why = setmetatable({}, { __mode = "k" }) -- item -> what its last update did (/cmp timers)
+local why = setmetatable({}, { __mode = "k" }) -- item -> what its last update did (/cme timers)
 local hidingNative = setmetatable({}, { __mode = "k" }) -- item -> true while Blizzard's is hidden
 
 local function SafeCall(object, method, ...)
@@ -347,7 +347,7 @@ function Timers:UpdateBuffItem(info, item)
 	end
 end
 
--- /cmp timers: what the debuff timers see right now.
+-- /cme timers: what the debuff timers see right now.
 function Timers:Report()
 	local now = GetTime()
 	CMP:Print("Debuff timers (in combat: " .. tostring(InCombatLockdown()) .. ")")

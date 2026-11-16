@@ -1,6 +1,6 @@
 local addonName, ns = ...
 
--- Cooldown Manager Plus
+-- Cooldown Manager Extras
 --
 -- Design rules (read before changing anything):
 --  * Blizzard's Cooldown Manager and Edit Mode stay in charge. We never replace their
@@ -14,7 +14,7 @@ local addonName, ns = ...
 
 local CMP = {}
 ns.CMP = CMP
-_G.CooldownManagerPlus = CMP -- handy for /dump; nothing reads it
+_G.CooldownManagerExtras = CMP -- handy for /dump; nothing reads it
 
 CMP.LEM = ns.LibEditMode
 
@@ -371,7 +371,7 @@ function CMP:RefreshDialog(info)
 end
 
 function CMP:Print(...)
-	print("|cff4fa3ffCooldown Manager Plus:|r", ...)
+	print("|cff4fa3ffCooldown Manager Extras:|r", ...)
 end
 
 ---------------------------------------------------------------------------
@@ -432,8 +432,8 @@ events:RegisterEvent("DISPLAY_SIZE_CHANGED")
 events:SetScript("OnEvent", function(_, event, arg1)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName then
-			CooldownManagerPlusDB = CooldownManagerPlusDB or {}
-			local db = CooldownManagerPlusDB
+			CooldownManagerExtrasDB = CooldownManagerExtrasDB or {}
+			local db = CooldownManagerExtrasDB
 			db.version = db.version or 1
 			db.layouts = db.layouts or {}
 			db.spells = db.spells or {}
@@ -535,8 +535,9 @@ end)
 -- Slash command
 ---------------------------------------------------------------------------
 
-SLASH_COOLDOWNMANAGERPLUS1 = "/cmp"
-SlashCmdList.COOLDOWNMANAGERPLUS = function(msg)
+SLASH_COOLDOWNMANAGEREXTRAS1 = "/cme"
+SLASH_COOLDOWNMANAGEREXTRAS2 = "/cmp" -- the name before 0.1 was Cooldown Manager Plus
+SlashCmdList.COOLDOWNMANAGEREXTRAS = function(msg)
 	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
 	if msg == "reset" then
 		if CMP.activeLayout then
@@ -564,7 +565,7 @@ SlashCmdList.COOLDOWNMANAGERPLUS = function(msg)
 				CMP.Profiles:SetCharacterProfile(match)
 				CMP:Print("This character now uses profile", match .. ".")
 			else
-				CMP:Print("No profile named", name .. ". Create one in /cmp options.")
+				CMP:Print("No profile named", name .. ". Create one in /cme options.")
 			end
 		end
 	elseif msg == "probe" then
@@ -588,14 +589,14 @@ SlashCmdList.COOLDOWNMANAGERPLUS = function(msg)
 	else
 		CMP:Print("Settings live in Edit Mode: select a cooldown viewer or the Personal Resource Display.")
 		CMP:Print("Per-spell borders: right-click a spell in the Cooldown Settings window.")
-		print("  /cmp options - profiles (share a setup between characters and talent groups)")
-		print("  /cmp profile [name|none] - list or switch this character's profile")
-		print("  /cmp status - show what the addon sees")
-		print("  /cmp probe - can addons read your tracked auras right now? (try it in combat)")
-		print("  /cmp timers - what the debuff timers see right now (try it when one is missing)")
-		print("  /cmp rings - what the addon can read from the debuff-type rings")
-		print("  /cmp blocked - list \"Interface action failed\" events and the addon the game blamed")
+		print("  /cme options - profiles (share a setup between characters and talent groups)")
+		print("  /cme profile [name|none] - list or switch this character's profile")
+		print("  /cme status - show what the addon sees")
+		print("  /cme probe - can addons read your tracked auras right now? (try it in combat)")
+		print("  /cme timers - what the debuff timers see right now (try it when one is missing)")
+		print("  /cme rings - what the addon can read from the debuff-type rings")
+		print("  /cme blocked - list \"Interface action failed\" events and the addon the game blamed")
 		print("  Masque: install Masque + Masque Blizzard Bars to skin the icons; this addon then leaves the icon look to Masque.")
-		print("  /cmp reset - reset this Edit Mode layout's settings")
+		print("  /cme reset - reset this Edit Mode layout's settings")
 	end
 end

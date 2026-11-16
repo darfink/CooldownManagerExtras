@@ -100,7 +100,7 @@ local function UpdateRingCopy(target, item, state, show)
 	end
 end
 
--- /cmp rings: what we can read from Blizzard's debuff rings right now.
+-- /cme rings: what we can read from Blizzard's debuff rings right now.
 function Skin:ReportRings()
 	CMP:Print("Debuff rings (in combat: " .. tostring(InCombatLockdown()) .. ")")
 	local function Show(value)
