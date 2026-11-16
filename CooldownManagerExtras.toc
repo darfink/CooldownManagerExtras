@@ -4,6 +4,7 @@
 ## Version: @project-version@
 ## Author: darfink
 ## X-License: MIT
+## X-Curse-Project-ID: 1809867
 ## SavedVariables: CooldownManagerExtrasDB
 ## OptionalDeps: Blizzard_EditMode, Blizzard_CooldownViewer, Blizzard_PersonalResourceDisplay, LibSharedMedia-3.0, SharedMedia, Masque, MasqueBlizzBars
 ## AllowLoadGameType: camelot, standard
