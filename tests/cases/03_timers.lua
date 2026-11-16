@@ -164,7 +164,7 @@ T.test("timers: the estimate keeps its start across refreshes", function(H, T)
 	T.truthy(overlay(item, H):IsShown())
 end)
 
--- Blizzard's icon can blink out for a moment while it refreshes (Timers.lua SAME_DEBUFF_GAP).
+-- An estimate running in combat, last updated just now.
 local function estimateRunning(H)
 	local item = newItem(H)
 	local aura = applyDebuff(H, item, 15)
@@ -181,18 +181,33 @@ local function estimateRunning(H)
 	return item, start
 end
 
-T.test("timers: a blink shorter than half a second keeps the same estimate", function(H, T)
-	local item, start = estimateRunning(H)
+-- In-game regression: hits on the shield update the auras all the time, so the debuff had
+-- always been "seen" a moment ago. Removed early and put on again right away, it used to
+-- count as the old one: that timer ran out early, and then nothing was shown at all.
+T.test("timers: removed early and put on again right away = a new debuff, timed from now", function(H, T)
+	local item = estimateRunning(H)
+	H.advance(0.2)
+	auraEvent(H) -- a hit on the shield
 	H.setItemAura(item, nil)
 	auraEvent(H)
-	H.advance(0.3)
+	H.advance(0.2)
 	applyHiddenDebuff(H, item)
 	auraEvent(H)
-	T.eq(H.state(overlay(item, H)).cd.start, start, "same debuff, same start")
-	T.truthy(overlay(item, H):IsShown())
+	local state = H.state(overlay(item, H)).cd
+	T.near(state.start, H.now, 1e-6, "timed from the new debuff")
+	H.advance(11)
+	auraEvent(H)
+	T.truthy(overlay(item, H):IsShown(), "still timed after the old one would have ended")
 end)
 
-T.test("timers: gone for longer than that and back = a new debuff, timed from now", function(H, T)
+T.test("timers: /cmp timers reports without raising", function(H, T)
+	estimateRunning(H)
+	H.CMP.Timers:Report()
+	_G.SlashCmdList.COOLDOWNMANAGERPLUS("timers")
+	T.truthy(true)
+end)
+
+T.test("timers: gone for a second and back = a new debuff, timed from now", function(H, T)
 	local item, start = estimateRunning(H)
 	H.setItemAura(item, nil)
 	auraEvent(H)

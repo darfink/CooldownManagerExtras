@@ -129,3 +129,68 @@ T.test("skin: PRD square style hides the bars' background art and restores it", 
 		for _, bg in ipairs(bgs(bar)) do T.eq(bg:GetAlpha(), 1) end
 	end
 end)
+
+-- Blizzard's debuff-type ring (Magic blue, Curse purple, ...) sticks out of square icons.
+local function debuffRing(H, item, atlas)
+	H.atlases[atlas] = true
+	item.DebuffBorder.Texture:SetAtlas(atlas)
+	item.DebuffBorder:Show()
+	item.DebuffBorder.Texture:Show()
+end
+-- our copy of the ring: a child frame of the item with one texture showing that atlas
+local function ringCopy(item, atlas)
+	for _, child in ipairs({ item:GetChildren() }) do
+		if child ~= item.DebuffBorder and child:GetObjectType() == "Frame" then
+			local regions = regionsOf(child, "Texture")
+			if #regions == 1 and regions[1]:GetAtlas() == atlas then return child end
+		end
+	end
+end
+local MAGIC = "ui-debuff-border-magic-noicon"
+
+T.test("skin: square icons hide Blizzard's debuff ring and show its art on the square edge", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
+	debuffRing(H, item, MAGIC)
+	H.CMP:Set("BuffIcon", "style", "square")
+	T.eq(item.DebuffBorder:GetAlpha(), 0, "Blizzard's ring hidden")
+	local copy = ringCopy(item, MAGIC)
+	T.truthy(copy and copy:IsShown(), "our copy shows the same art")
+	H.CMP:Set("BuffIcon", "style", "blizzard")
+	T.eq(item.DebuffBorder:GetAlpha(), 1, "ring back")
+	T.falsy(copy:IsShown(), "copy gone")
+end)
+
+T.test("skin: no debuff (ring hidden) = no copy", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
+	debuffRing(H, item, MAGIC)
+	item.DebuffBorder:Hide()
+	H.CMP:Set("BuffIcon", "style", "square")
+	local copy = ringCopy(item, MAGIC)
+	T.falsy(copy and copy:IsShown())
+end)
+
+T.test("skin: the ring copy works when the atlas is secret (combat)", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
+	debuffRing(H, item, MAGIC)
+	local texture = item.DebuffBorder.Texture
+	local get = texture.GetAtlas
+	H.secretReturn(texture, "GetAtlas", "whole")
+	H.CMP:Set("BuffIcon", "style", "square")
+	T.eq(item.DebuffBorder:GetAlpha(), 0)
+	local shown = false
+	for _, child in ipairs({ item:GetChildren() }) do
+		if child ~= item.DebuffBorder and child:GetObjectType() == "Frame" and #regionsOf(child, "Texture") == 1 and child:IsShown() then
+			shown = true
+		end
+	end
+	T.truthy(shown, "copy shown from the secret atlas")
+end)
+
+T.test("skin: /cmp rings reports without raising, also with secret atlases", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
+	debuffRing(H, item, MAGIC)
+	_G.SlashCmdList.COOLDOWNMANAGERPLUS("rings")
+	H.secretReturn(item.DebuffBorder.Texture, "GetAtlas", "whole")
+	_G.SlashCmdList.COOLDOWNMANAGERPLUS("rings")
+	T.truthy(true)
+end)

@@ -569,6 +569,10 @@ SlashCmdList.COOLDOWNMANAGERPLUS = function(msg)
 		end
 	elseif msg == "probe" then
 		CMP.Diagnostics:Probe()
+	elseif msg == "rings" then
+		CMP.Skin:ReportRings()
+	elseif msg == "timers" then
+		CMP.Timers:Report()
 	elseif msg == "blocked" or msg == "blocked clear" then
 		CMP.Diagnostics:Print(msg == "blocked clear")
 	elseif msg == "status" then
@@ -588,6 +592,8 @@ SlashCmdList.COOLDOWNMANAGERPLUS = function(msg)
 		print("  /cmp profile [name|none] - list or switch this character's profile")
 		print("  /cmp status - show what the addon sees")
 		print("  /cmp probe - can addons read your tracked auras right now? (try it in combat)")
+		print("  /cmp timers - what the debuff timers see right now (try it when one is missing)")
+		print("  /cmp rings - what the addon can read from the debuff-type rings")
 		print("  /cmp blocked - list \"Interface action failed\" events and the addon the game blamed")
 		print("  Masque: install Masque + Masque Blizzard Bars to skin the icons; this addon then leaves the icon look to Masque.")
 		print("  /cmp reset - reset this Edit Mode layout's settings")

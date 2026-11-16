@@ -27,6 +27,7 @@ local NATIVE_SWIPE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 
 local overlays = setmetatable({}, { __mode = "k" }) -- item -> our Cooldown frame
+local why = setmetatable({}, { __mode = "k" }) -- item -> what its last update did (/cmp timers)
 local hidingNative = setmetatable({}, { __mode = "k" }) -- item -> true while Blizzard's is hidden
 
 local function SafeCall(object, method, ...)
@@ -228,11 +229,13 @@ local function Learned()
 end
 -- By spell, not item: Blizzard reuses its icons from a pool as auras come and go.
 local estimates = {} -- spellID -> { start, duration }
-local sawEmpty = {} -- spellID -> true once we saw it absent (so we know when it begins)
-local lastSeen = {} -- spellID -> GetTime() when we last saw it present
--- Blizzard's icon can blink out for a moment while it refreshes; a gap shorter than this
--- is the same debuff, a longer one means it was removed and put on again.
-local SAME_DEBUFF_GAP = 0.5
+-- spellID -> true once we saw it absent: the next time it's there, it has just begun.
+-- Any absence we see counts, however short: we only look once per frame after an aura
+-- change, so what we see absent really was removed. (Guessing "a short gap is the same
+-- debuff" from when we last saw it went wrong in combat: every hit on a shield updates
+-- the auras, so a debuff put on again right after it ran out looked like the old one, and
+-- its timer ran out early.)
+local sawEmpty = {}
 
 -- Shown state, or nil when it can't be read.
 local function Shown(item)
@@ -278,32 +281,33 @@ local function ShowEstimate(info, item, cooldownInfo)
 	local cached = SafeCall(item, "GetAuraDataCached")
 	local unit = SafeCall(item, "GetAuraDataUnit")
 	if not cached or CMP.IsSecret(unit) or unit ~= "player" then
+		why[item] = cached and "aura isn't on you" or "no aura data"
 		return false
 	end
 	local spell = TrackedSpell(cooldownInfo)
 	if not spell then
+		why[item] = "not a debuff seen out of combat yet"
 		return false
 	end
 	local now = GetTime()
 	local estimate = estimates[spell]
-	local running = estimate and now < estimate.start + estimate.duration
-	local blinked = sawEmpty[spell] and lastSeen[spell] and now - lastSeen[spell] < SAME_DEBUFF_GAP
-	if not running or (sawEmpty[spell] and not blinked) then
-		if not sawEmpty[spell] then
-			return false -- already there when we started looking: we don't know when it began
-		end
+	if sawEmpty[spell] then
 		estimate = { start = now, duration = Learned()[spell] }
 		estimates[spell] = estimate
+		sawEmpty[spell] = nil
+	elseif not estimate or now >= estimate.start + estimate.duration then
+		why[item] = "already on when we started looking (start unknown)"
+		return false
 	end
-	sawEmpty[spell] = nil
-	lastSeen[spell] = now
 	local cooldown = Overlay(info, item)
 	Style(info, item, cooldown, true)
 	if not pcall(cooldown.SetCooldown, cooldown, estimate.start, estimate.duration) then
+		why[item] = "the game refused the estimate"
 		return false
 	end
 	cooldown:Show()
 	SetNativeHidden(item, true)
+	why[item] = ("estimate: %.1f s left of %g"):format(estimate.start + estimate.duration - now, estimate.duration)
 	return true
 end
 
@@ -314,11 +318,13 @@ end
 
 function Timers:UpdateBuffItem(info, item)
 	if not CMP:Get(info.key, "debuffTimers") or Shown(item) ~= true then
+		why[item] = CMP:Get(info.key, "debuffTimers") and "hidden" or "debuff timers off"
 		Stop(item)
 		return
 	end
 	local cooldownInfo = CooldownInfo(item)
 	if not cooldownInfo then
+		why[item] = "no cooldown info"
 		Stop(item)
 		return
 	end
@@ -332,11 +338,37 @@ function Timers:UpdateBuffItem(info, item)
 			-- refreshes; ours replaces it, so the two never show at once.
 			SetNativeHidden(item, true)
 			pcall(Learn, item, cooldownInfo, instance)
+			why[item] = "real timer"
 			return
 		end
 	end
 	if not ShowEstimate(info, item, cooldownInfo) then
 		Stop(item)
+	end
+end
+
+-- /cmp timers: what the debuff timers see right now.
+function Timers:Report()
+	local now = GetTime()
+	CMP:Print("Debuff timers (in combat: " .. tostring(InCombatLockdown()) .. ")")
+	for spell, duration in pairs(Learned()) do
+		local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell)
+		local estimate = estimates[spell]
+		local left = estimate and estimate.start + estimate.duration - now
+		print(("  %s (%d): learned %g s, seen absent: %s, estimate: %s"):format(
+			CMP.IsSecret(name) and "?" or tostring(name or "?"), spell, duration, tostring(sawEmpty[spell] == true),
+			left and ("%.1f s left"):format(left) or "none"))
+	end
+	for _, info in ipairs(CMP.frameInfos) do
+		if info.kind == "icons" and info.buffs and info.frame then
+			for item in pairs(CMP.Layout:Items(info.frame)) do
+				local cooldownInfo = item.layoutIndex and CooldownInfo(item)
+				local spell = cooldownInfo and Usable(cooldownInfo.spellID)
+				if spell and (why[item] ~= "hidden" or TrackedSpell(cooldownInfo)) then
+					print(("  icon %d: %s"):format(spell, tostring(why[item] or "not updated yet")))
+				end
+			end
+		end
 	end
 end
 
@@ -394,7 +426,7 @@ local function PresentDebuffs()
 				local cooldownInfo = Shown(item) and CooldownInfo(item)
 				local spell = cooldownInfo and TrackedSpell(cooldownInfo)
 				if spell and SafeCall(item, "GetAuraDataCached") then
-					present[spell] = true -- (lastSeen is ShowEstimate's: it measures the gap)
+					present[spell] = true
 				end
 			end
 		end

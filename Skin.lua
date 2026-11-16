@@ -40,6 +40,131 @@ local function Scan(target)
 	return state
 end
 
+-- Debuffs (Tracked Buffs, Tracked Bars): Blizzard rings the icon in the debuff type's color
+-- (Magic blue, Curse purple, ...), 3 units past the icon on each side: made for round
+-- icons, it sticks out of square ones. Square style hides that ring and shows the same art
+-- on our own texture, exactly on the square icon. In combat the game hides which art it
+-- is (the atlas name is secret), but our texture can still be given it: SetAtlas takes
+-- secret values from addons, so this works in and out of combat with no lookup of ours.
+local function Plain(value)
+	return not CMP.IsSecret(value) and value ~= nil -- secret check first
+end
+
+local function Visible(region)
+	local ok, shown = pcall(region.IsShown, region)
+	return ok and Plain(shown) and shown == true
+end
+
+-- The art of the ring Blizzard shows right now (maybe secret), or nil if none is shown.
+local function RingAtlas(item)
+	local ring = item.DebuffBorder
+	local texture = ring and ring.Texture
+	if not texture or not Visible(ring) or not Visible(texture) then
+		return nil
+	end
+	local ok, atlas = pcall(texture.GetAtlas, texture)
+	if not ok or not CMP.IsSecret(atlas) and not atlas then
+		return nil
+	end
+	return atlas
+end
+
+local function UpdateRingCopy(target, item, state, show)
+	local atlas = show and RingAtlas(item)
+	if not atlas then
+		if state.ringCopy then
+			state.ringCopy:Hide()
+		end
+		return
+	end
+	local copy = state.ringCopy
+	if not copy then
+		copy = CreateFrame("Frame", nil, target)
+		copy:SetAllPoints(target)
+		-- above the icon, the cooldown swipe and Blizzard's ring; below our pixel border
+		local level = target:GetFrameLevel()
+		for _, child in ipairs({ state.cooldown, item.DebuffBorder }) do
+			if child and child.GetFrameLevel then
+				level = math.max(level, child:GetFrameLevel())
+			end
+		end
+		copy:SetFrameLevel(level + 1)
+		copy.texture = copy:CreateTexture(nil, "OVERLAY")
+		copy.texture:SetAllPoints()
+		state.ringCopy = copy
+	end
+	if pcall(copy.texture.SetAtlas, copy.texture, atlas) then
+		copy:Show()
+	else
+		copy:Hide()
+	end
+end
+
+-- /cmp rings: what we can read from Blizzard's debuff rings right now.
+function Skin:ReportRings()
+	CMP:Print("Debuff rings (in combat: " .. tostring(InCombatLockdown()) .. ")")
+	local function Show(value)
+		return CMP.IsSecret(value) and "SECRET" or tostring(value)
+	end
+	local count = 0
+	for _, info in ipairs(CMP.frameInfos) do
+		if info.frame and (info.kind == "icons" or info.kind == "bars") then
+			for item in pairs(CMP.Layout:Items(info.frame)) do
+				local ring = item.DebuffBorder
+				local texture = ring and ring.Texture
+				if texture and item.layoutIndex then
+					local okShown, shown = pcall(ring.IsShown, ring)
+					local okAtlas, atlas = pcall(texture.GetAtlas, texture)
+					local okFile, file = pcall(texture.GetTexture, texture)
+					local okColor, r, g, b = pcall(texture.GetVertexColor, texture)
+					local spell = CMP:GetItemSpellID(item)
+					local state = states[info.kind == "bars" and item.Icon or item]
+					local copy = state and state.ringCopy
+					local copied = copy and Visible(copy) and "ours shown" or "ours hidden"
+					if not (okShown and not CMP.IsSecret(shown) and shown == false) then
+						count = count + 1
+						print(("  %s %s: shown=%s atlas=%s texture=%s tint=%s,%s,%s -> %s"):format(
+							info.key, Show(spell), okShown and Show(shown) or "error", okAtlas and Show(atlas) or "error",
+							okFile and Show(file) or "error", okColor and Show(r) or "error", Show(g), Show(b),
+							copied))
+					end
+				end
+			end
+		end
+	end
+	if count == 0 then
+		print("  no debuff ring is shown")
+	end
+end
+
+-- Blizzard recolors / shows / hides the ring as the aura changes: restyle the item then.
+local function WatchDebuffRing(info, item, state)
+	if state.ringWatched or not item.DebuffBorder then
+		return
+	end
+	state.ringWatched = true
+	local function Restyle()
+		CMP.Safe(Skin.ApplyItem, Skin, info, item)
+	end
+	CMP.HookMethod(item.DebuffBorder, "UpdateFromAuraData", Restyle)
+	item.DebuffBorder:HookScript("OnShow", Restyle)
+	item.DebuffBorder:HookScript("OnHide", Restyle)
+end
+
+local function SetRingHidden(item, state, hidden)
+	local ring = item.DebuffBorder
+	if not ring then
+		return
+	end
+	if hidden then
+		ring:SetAlpha(0)
+		state.ringHidden = true
+	elseif state.ringHidden then
+		ring:SetAlpha(1)
+		state.ringHidden = nil
+	end
+end
+
 -- Square style replaces Blizzard's rounded "cooldown ready" flash with a square one.
 local function EnsureSquareFlash(target, state)
 	if state.squareFlash or not state.flash then
@@ -165,6 +290,8 @@ function Skin:ApplyItem(info, item)
 		-- Masque owns mask, texcoords, swipe and frame art. Only a per-spell border is ours,
 		-- drawn on our own frame above the icon.
 		state.square = false
+		SetRingHidden(item, state, false)
+		UpdateRingCopy(target, item, state, false)
 		if spellStyle and spellStyle.color then
 			LayoutBorder(EnsureBorder(target, state), spellStyle.size or 2, spellStyle.color)
 		elseif state.border then
@@ -199,11 +326,17 @@ function Skin:ApplyItem(info, item)
 			EnsureSquareFlash(target, state)
 			state.flash:SetAlpha(0)
 		end
+		WatchDebuffRing(info, item, state)
+		SetRingHidden(item, state, true)
+		-- a spell's own border color wins over the debuff type's
+		UpdateRingCopy(target, item, state, not (spellStyle and spellStyle.color))
 		local color = spellStyle and spellStyle.color or CMP:Get(key, "borderColor")
 		local size = spellStyle and spellStyle.size or CMP:Get(key, "borderSize")
 		LayoutBorder(EnsureBorder(target, state), size, color)
 	else
 		state.square = false
+		SetRingHidden(item, state, false)
+		UpdateRingCopy(target, item, state, false)
 		if state.mask and not state.masked then
 			icon:AddMaskTexture(state.mask)
 			state.masked = true

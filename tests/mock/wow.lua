@@ -855,7 +855,8 @@ function M.new(opts)
 	end
 	function Texture:GetTexture() return S[self].texture end
 	function Texture:SetAtlas(name, useAtlasSize)
-		if not isAtlas(name) then
+		-- the real client takes a secret atlas from addons (SecretArguments = AllowedWhenTainted)
+		if not H.isSecret(name) and not isAtlas(name) then
 			-- the client logs an error for an unknown atlas; here it is a recorded failure
 			record("SetAtlas: unknown atlas '" .. tostring(name) .. "'", "Texture:SetAtlas")
 		end
