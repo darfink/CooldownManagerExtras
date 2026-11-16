@@ -393,9 +393,92 @@ function B.install(H)
 		prd.HealthBarsContainer = CreateFrame("Frame", nil, prd)
 		prd.HealthBarsContainer.healthBar = bar(prd.HealthBarsContainer)
 		prd.PowerBar = bar(prd)
+		-- the cost of the spell being cast (Blizzard colors it per power type)
+		prd.PowerBar.ManaCostPredictionBar = prd.PowerBar:CreateTexture(nil, "ARTWORK")
+		prd.PowerBar.ManaCostPredictionBar:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
+		prd.PowerBar.ManaCostPredictionBar:SetVertexColor(0, 0.447, 1)
 		prd.AlternatePowerBar = bar(prd)
 		H.viewers.PRD = prd
 		return prd
+	end
+
+	---------------------------------------------------------------------------
+	-- Cooldown Settings window (Blizzard_CooldownViewer/CooldownViewerSettings), reduced:
+	-- sections with an item pool and a GridLayoutFrame container, stride 7, 38px icons,
+	-- 8px padding. The section's Layout runs the grid and then measures it.
+	---------------------------------------------------------------------------
+	-- sections: list of { category = Enum value, spells = { spellID, ... } }
+	function H.makeCooldownSettings(sections)
+		local settings = CreateFrame("Frame", "CooldownViewerSettings", UIParent)
+		H.raw.SetSize(settings, 400, 600)
+		H.raw.SetPoint(settings, "CENTER", UIParent, "CENTER", 0, 0)
+		local frames = {}
+		local nextIndex = 1
+		for _, section in ipairs(sections) do
+			local frame = CreateFrame("Frame", nil, settings)
+			frame.categoryObj = { GetCategory = function() return section.category end }
+			frame.GetCategoryObject = function(self) return self.categoryObj end
+			local container = CreateFrame("Frame", nil, frame)
+			container:SetPoint("TOPLEFT", frame, "TOPLEFT", 13, -37)
+			container.stride, container.childXPadding, container.childYPadding = 7, 8, 8
+			frame.Container = container
+			local active = {}
+			frame.itemPool = {
+				EnumerateActive = function()
+					local i = 0
+					return function() i = i + 1 return active[i] end
+				end,
+				GetNumActive = function() return #active end,
+			}
+			local function item(spellID)
+				local it = CreateFrame("Frame", nil, container)
+				it:SetSize(38, 38)
+				it.layoutIndex = nextIndex
+				nextIndex = nextIndex + 1
+				it.GetCooldownInfo = function() return spellID and { spellID = spellID } or nil end
+				it.IsEmptyCategory = function() return spellID == nil end
+				it.spellID = spellID
+				table.insert(active, it)
+			end
+			for _, spellID in ipairs(section.spells or {}) do item(spellID) end
+			if #active == 0 then item(nil) end
+			container.Layout = function(self)
+				local kids = {}
+				for _, child in ipairs({ self:GetChildren() }) do
+					if child.layoutIndex and child:IsShown() then kids[#kids + 1] = child end
+				end
+				table.sort(kids, function(a, b) return a.layoutIndex < b.layoutIndex end)
+				for n, child in ipairs(kids) do
+					local col, row = (n - 1) % 7, math.floor((n - 1) / 7)
+					child:ClearAllPoints()
+					child:SetPoint("TOPLEFT", self, "TOPLEFT", col * 46, -row * 46)
+				end
+				local rows = math.max(1, math.ceil(#kids / 7))
+				self:SetSize(315, rows * 46 - 8)
+			end
+			frame.Layout = function(self)
+				self.Container:Layout()
+				self:SetSize(344, self.Container:GetHeight() + 37)
+			end
+			frame.RefreshLayout = function(self) self.Container:Layout() end
+			frame:SetPoint("TOPLEFT", frames[#frames] or settings, frames[#frames] and "BOTTOMLEFT" or "TOPLEFT", 0, frames[#frames] and -18 or 0)
+			frames[#frames + 1] = frame
+		end
+		settings.categoryPool = {
+			EnumerateActive = function()
+				local i = 0
+				return function() i = i + 1 return frames[i] end
+			end,
+		}
+		settings.RefreshLayout = function()
+			for _, frame in ipairs(frames) do
+				frame:RefreshLayout()
+				frame:Layout()
+			end
+		end
+		rawset(_G, "CooldownViewerSettings", settings)
+		settings:RefreshLayout()
+		return settings, frames
 	end
 end
 

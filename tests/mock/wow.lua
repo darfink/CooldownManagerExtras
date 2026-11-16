@@ -33,6 +33,15 @@ local OPTIONAL = {
 	Settings = false,
 	Menu = false,
 	EDIT_MODE_GAMEPAD_SYSTEM_MAP = true, -- LibEditMode probes the three layout maps
+	-- Custom.lua / CustomSettings.lua: older-client fallbacks and optional UI
+	GetSpellTexture = true, GetItemIcon = true, GetItemCount = true, IsEquippedItem = true,
+	IsEquippableItem = true, GetItemSpell = true, GetItemInfo = true, GetItemCooldown = true,
+	IsSpellKnown = true, C_SpellBook = true, CooldownViewerSettings = true, MenuUtil = true,
+	StaticPopupDialogs = true, StaticPopup_Show = true, C_Container = true,
+	NUM_TOTAL_EQUIPPED_BAG_SLOTS = true, NUM_BAG_SLOTS = true, ADD = true, CANCEL = true, REMOVE = true,
+	GetCursorInfo = true, ClearCursor = true,
+	GameTooltip_SetDefaultAnchor = true, PowerBarColor = true, RAID_CLASS_COLORS = true, C_ClassColor = true,
+	C_TooltipInfo = true, GetSpellBaseCooldown = true, ITEM_COOLDOWN_TOTAL = true, StaticPopup_Resize = true,
 	-- frames the addon looks up by name (_G[info.global]); nil until Blizzard's addon made them
 	EssentialCooldownViewer = true, UtilityCooldownViewer = true, BuffIconCooldownViewer = true,
 	BuffBarCooldownViewer = true, PersonalResourceDisplayFrame = true,
@@ -619,6 +628,10 @@ function M.new(opts)
 	function Frame:IsEventRegistered(event) return S[self].events[event] == true end
 
 	function Frame:EnableMouse(v) S[self].mouse = v end
+	function Frame:SetMouseClickEnabled(v) S[self].mouseClick = v end
+	function Frame:SetMouseMotionEnabled(v) S[self].mouseMotion = v end
+	function Frame:IsMouseMotionEnabled() return S[self].mouseMotion == true end
+	function Frame:IsMouseClickEnabled() return S[self].mouseClick == true end
 	function Frame:IsMouseEnabled() return S[self].mouse == true end
 	function Frame:EnableMouseWheel(v) S[self].wheel = v end
 	function Frame:IsMouseWheelEnabled() return S[self].wheel == true end
@@ -808,6 +821,10 @@ function M.new(opts)
 	function StatusBar:SetValue(v) S[self].value = v end
 	function StatusBar:GetValue() return S[self].value or 0 end
 	function StatusBar:SetStatusBarColor(r, g, b, a) S[self].barColor = { r, g, b, a } end
+	function StatusBar:GetStatusBarColor()
+		local c = S[self].barColor or { 1, 1, 1, 1 }
+		return c[1], c[2], c[3], c[4] or 1
+	end
 	function StatusBar:SetOrientation() end
 	function StatusBar:SetReverseFill() end
 	function StatusBar:SetFillStyle() end
@@ -868,6 +885,7 @@ function M.new(opts)
 		local s = S[self]
 		s.color, s.texture, s.atlas = { r, g, b, a or 1 }, nil, nil
 	end
+	function Texture:_colorTexture() local c = S[self].color if c then return unpack(c) end end -- test only
 	function Texture:SetTexCoord(...) S[self].texCoord = { ... } end
 	function Texture:GetTexCoord() return unpack(S[self].texCoord or { 0, 0, 0, 1, 1, 0, 1, 1 }) end
 	function Texture:SetVertexColor(r, g, b, a) S[self].vertexColor = { r, g, b, a or 1 } end
@@ -1123,6 +1141,7 @@ function M.new(opts)
 		return unpack(out)
 	end
 	G.date = os.date
+	G.time = function() return math.floor(H.now) end
 	G.format = string.format
 	G.strjoin = function(d, ...) return table.concat({ ... }, d) end
 	G.tinsert = table.insert
@@ -1200,6 +1219,11 @@ function M.new(opts)
 	G.WHITE_FONT_COLOR = G.CreateColor(1, 1, 1)
 	G.DISABLED_FONT_COLOR = G.CreateColor(0.5, 0.5, 0.5)
 	G.STANDARD_TEXT_FONT = "Fonts\\FRIZQT__.TTF"
+	G.DebuffTypeColor = {
+		none = { r = 0.8, g = 0, b = 0 }, Magic = { r = 0.2, g = 0.6, b = 1 },
+		Curse = { r = 0.6, g = 0, b = 1 }, Disease = { r = 0.6, g = 0.4, b = 0 },
+		Poison = { r = 0, g = 0.6, b = 0 },
+	}
 	G.UNIT_NAME_FONT = "Fonts\\FRIZQT__.TTF"
 	G.DAMAGE_TEXT_FONT = "Fonts\\FRIZQT__.TTF"
 	for name, f in pairs(M.FONTS) do
@@ -1222,6 +1246,7 @@ function M.new(opts)
 		EditModeSettingDisplayType = { Dropdown = 0, Slider = 1, Checkbox = 2 },
 		PowerType = { Mana = 0 },
 		CooldownViewerIconDirection = { Left = 0, Right = 1 },
+		CooldownViewerCategory = { Essential = 0, Utility = 1, TrackedBuff = 2, TrackedBar = 3 },
 	}
 
 	-- Pixel perfect scale: 1 UI unit == 1 physical pixel at the chosen resolution.
@@ -1278,7 +1303,7 @@ function M.new(opts)
 	---------------------------------------------------------------------------
 	-- C_* namespaces and misc API
 	---------------------------------------------------------------------------
-	H.atlases = { ["UI-HUD-CoolDownManager-Bar"] = true, ["UI-HUD-CoolDownManager-Bar-BG"] = true,
+	H.atlases = { ["cdm-empty"] = true, ["UI-HUD-CoolDownManager-Bar"] = true, ["UI-HUD-CoolDownManager-Bar-BG"] = true,
 		["UI-HUD-CoolDownManager-Mask"] = true, ["UI-HUD-CoolDownManager-IconOverlay"] = true,
 		["UI-CooldownManager-OORshadow"] = true, ["UI-HUD-ActionBar-GCD-Flipbook"] = true,
 		["UI-HUD-CoolDownManager-Bar-Pip"] = true }
@@ -1301,7 +1326,9 @@ function M.new(opts)
 	G.GetRealmName = function() return H.player.realm end
 	G.UnitExists = function(unit) return H.units[unit] ~= nil end
 	G.UnitCanAssist = function(_, unit) return H.units[unit] ~= nil and H.units[unit].friendly == true end
-	G.UnitPowerType = function() return 0, "MANA" end
+	H.powerToken = "MANA"
+	G.UnitPowerType = function() return 0, H.powerToken end
+	G.UnitClass = function() return "Priest", "PRIEST", 5 end
 	H.units = { player = { friendly = true } }
 	G.C_SpecializationInfo = {
 		GetActiveSpecGroup = function() return H.player.talentGroup end,
@@ -1328,12 +1355,33 @@ function M.new(opts)
 		GetSpellCooldownDuration = function(id)
 			return { spellCooldown = id }
 		end,
+		GetSpellTexture = function(id) local s = H.spells[id] return s and s.texture or 136243 end,
+		GetSpellCharges = function(id) local s = H.spells[id] return s and s.charges or nil end,
+		GetSpellCooldown = function(id)
+			return { startTime = 0, duration = 0, isEnabled = true, isOnGCD = false }
+		end,
 	}
-	G.C_Item = { GetItemSpell = function() return nil end, GetItemInfoInstant = function() return nil end }
+	-- H.spells[id].known = false: not known (custom entries hide it)
+	G.IsPlayerSpell = function(id) local s = H.spells[id] return not (s and s.known == false) end
+	-- items: H.items[id] = { name, count, texture, equippable, equipped, use }
+	H.items = {}
+	H.inventory = {} -- slot -> itemID
+	G.C_Item = {
+		GetItemSpell = function(id) local i = H.items[id] return i and i.use or nil end,
+		GetItemInfoInstant = function() return nil end,
+		GetItemIconByID = function(id) local i = H.items[id] return i and i.texture or 134400 end,
+		GetItemCount = function(id) local i = H.items[id] return i and i.count or 0 end,
+		IsEquippedItem = function(id) local i = H.items[id] return i and i.equipped == true or false end,
+		IsEquippableItem = function(id) local i = H.items[id] return i and i.equippable == true or false end,
+		GetItemNameByID = function(id) local i = H.items[id] return i and i.name or nil end,
+		GetItemCooldown = function(id) return 0, 0, 1 end,
+	}
+	G.GetInventoryItemTexture = function(_, slot) local id = H.inventory[slot] return id and 134400 or nil end
+	G.GetInventoryItemCooldown = function() return 0, 0, 1 end
 	G.FindBaseSpellByID = function(id) return id end
 	G.GetBindingKey = function() return nil end
 	G.GetActionInfo = function() return nil end
-	G.GetInventoryItemID = function() return nil end
+	G.GetInventoryItemID = function(_, slot) return H.inventory[slot] end
 	G.IsAltKeyDown = function() return false end
 	G.IsShiftKeyDown = function() return false end
 
@@ -1376,11 +1424,62 @@ function M.new(opts)
 			return false
 		end,
 		GetRefreshCarryOverDuration = function() return 0 end,
+		GetAuraDataByIndex = function(unit, index, filter)
+			local list = {}
+			for _, aura in pairs(H.auras[unit] or {}) do
+				local harmful = aura.isHarmful == true
+				-- hiddenFromLookup: hidden from addons (combat), like the lookups by spell ID
+				if (filter == "HARMFUL") == harmful and not aura.hiddenFromLookup then list[#list + 1] = aura end
+			end
+			table.sort(list, function(a, b) return a.auraInstanceID < b.auraInstanceID end)
+			return list[index]
+		end,
 	}
 
 	-- Menu / Settings (Blizzard's)
 	H.menuModifiers = {}
 	G.Menu = { ModifyMenu = function(tag, fn) H.menuModifiers[tag] = fn end }
+
+	-- Menu descriptions, recorded: H.newMenu() -> root; root.entries = { { kind, text, fn, ... } }
+	function H.newMenu()
+		local function Description()
+			local d = { entries = {} }
+			local function add(kind, text, a, b)
+				local e = Description()
+				e.kind, e.text, e.enabled = kind, text, true
+				if kind == "button" then e.fn = a
+				elseif kind == "radio" or kind == "checkbox" then e.isSelected, e.fn = a, b end
+				function e:SetEnabled(v) self.enabled = v and true or false end
+				function e:SetTooltip(fn) self.tooltip = fn end
+				table.insert(d.entries, e)
+				return e
+			end
+			function d:CreateButton(text, fn) return add("button", text, fn) end
+			function d:CreateRadio(text, isSelected, fn) return add("radio", text, isSelected, fn) end
+			function d:CreateCheckbox(text, isSelected, fn) return add("checkbox", text, isSelected, fn) end
+			function d:CreateTitle(text) return add("title", text) end
+			function d:CreateDivider() return add("divider") end
+			-- first entry whose text contains `text` (plain), searching submenus too
+			function d:Find(text)
+				for _, e in ipairs(self.entries) do
+					if e.text and e.text:find(text, 1, true) then return e end
+					local sub = e:Find(text)
+					if sub then return sub end
+				end
+			end
+			return d
+		end
+		return Description()
+	end
+	H.lastMenu = nil
+	G.MenuUtil = {
+		CreateContextMenu = function(owner, builder)
+			local root = H.newMenu()
+			builder(owner, root)
+			H.lastMenu = root
+			return root
+		end,
+	}
 	H.settingsCategories = {}
 	G.Settings = {
 		RegisterCanvasLayoutCategory = function(panel, name)

@@ -14,6 +14,8 @@ CMP.Settings = Settings
 local LEM = CMP.LEM
 local Type = LEM.SettingType
 
+local PANEL_WIDTH = 343 + 40 + 20 -- widest row (slider) + LibEditMode's padding + room for long labels
+
 local function Option(text, value)
 	return { text = text, value = value }
 end
@@ -21,7 +23,7 @@ end
 -- Settings that show, hide or relabel other settings. Only these rebuild the panel;
 -- rebuilding on every change would drop an active slider drag.
 local PRDBarSettings, BuffBarSettings, SpacingSettings
-local STRUCTURAL = { align = true, sharedBorders = true, attachTo = true, style = true, barStyle = true, matchWidth = true, keybinds = true }
+local STRUCTURAL = { align = true, sharedBorders = true, attachTo = true, style = true, barStyle = true, matchWidth = true, keybinds = true, healthColorMode = true, costColorMode = true }
 
 -- Settings that only apply because of the setting above them are indented under it, with a
 -- thin blue guide line (our accent color) so they read as one group.
@@ -444,10 +446,10 @@ local function ColorSetting(info, field, name, desc, hidden)
 end
 
 PRDBarSettings = function(info, list)
-	local collapsed = Section(info, list, "bars", "Bar Look", false)
+	local collapsed = Section(info, list, "bars", "Bar Style", false)
 	table.insert(list, Bind(info, "style", {
 		kind = Type.Dropdown,
-		name = "Bar Style",
+		name = "Style",
 		desc = "Blizzard: the normal bar frame.\nSquare: no frame art; a plain background and a crisp border inside each bar, so the bars are exactly as wide as they look (handy next to square icons).",
 		values = {
 			Option("Blizzard", "blizzard"),
@@ -595,8 +597,142 @@ local function MediaValues(kind)
 	end
 end
 
+-- Personal Resource Display, one section per bar:
+--  * Health Bar: color (Blizzard / class / custom) and texture.
+--  * Power Bar: color per power type (Mana, Rage, Energy, ...; the settings edit your
+--    current type, each type keeps its own), texture, the cast cost preview and the
+--    five-second rule.
+local function PowerColorSetting(info, setting)
+	setting.get = function(layoutName)
+		local map = CMP:Get(info.key, "powerColors", layoutName)
+		return setting.toValue(type(map) == "table" and map[CMP.Media:PowerToken()] or nil)
+	end
+	setting.set = function(layoutName, value)
+		local map = CMP:Get(info.key, "powerColors", layoutName)
+		map = type(map) == "table" and CMP.Copy(map) or {}
+		local token = CMP.Media:PowerToken()
+		if setting.onlyWhenSet and map[token] == nil then
+			return -- (the color picker is hidden while off; a reset must not turn it on)
+		end
+		map[token] = setting.fromValue(value)
+		CMP:Set(info.key, "powerColors", next(map) and map or false, layoutName)
+		CMP.Session:Touch(info.key)
+		if setting.structural then
+			CMP:RefreshDialog(info)
+		end
+	end
+	return setting
+end
+
+local function HealthBarSettings(info, list)
+	local collapsed = Section(info, list, "health", "Health Bar", false)
+	table.insert(list, Bind(info, "healthColorMode", {
+		kind = Type.Dropdown,
+		name = "Color",
+		values = {
+			Option("Blizzard", "default"),
+			Option("Class Color", "class"),
+			Option("Custom", "custom"),
+		},
+		hidden = collapsed,
+	}))
+	table.insert(list, ColorSetting(info, "healthColor", INDENT .. "Custom", nil, Any(collapsed, function(layoutName)
+		return CMP:Get(info.key, "healthColorMode", layoutName) ~= "custom"
+	end)))
+	table.insert(list, Bind(info, "healthTexture", {
+		kind = Type.Dropdown,
+		name = "Texture",
+		desc = "Default keeps Blizzard's.",
+		values = MediaValues("statusbar"),
+		height = 320,
+		hidden = collapsed,
+	}))
+end
+
+local function PowerBarSettings(info, list)
+	local collapsed = Section(info, list, "power", "Power Bar", false)
+	local powerNote = "\n\nFor your current power type. Each type (Mana, Rage, Energy, ...) keeps its own: switch forms or characters to set another."
+	table.insert(list, PowerColorSetting(info, {
+		kind = Type.Checkbox,
+		name = "Custom Color",
+		desc = "Color the power bar yourself, for example a turquoise mana bar." .. powerNote,
+		default = false,
+		structural = true,
+		toValue = function(value) return value ~= nil end,
+		fromValue = function(on)
+			return on and CMP.Media:DefaultPowerColor(CMP.Media:PowerToken()) or nil
+		end,
+		hidden = collapsed,
+	}))
+	local powerColor = PowerColorSetting(info, {
+		kind = Type.ColorPicker,
+		name = INDENT .. "Color",
+		onlyWhenSet = true,
+		desc = "Color of the power bar." .. powerNote,
+		hasOpacity = true,
+		toValue = function(value)
+			value = value or CMP.Media:DefaultPowerColor(CMP.Media:PowerToken())
+			return CreateColor(value.r, value.g, value.b, value.a or 1)
+		end,
+		fromValue = function(color)
+			local r, g, b, a = color:GetRGBA()
+			return { r = r, g = g, b = b, a = a }
+		end,
+		hidden = Any(collapsed, function(layoutName)
+			local map = CMP:Get(info.key, "powerColors", layoutName)
+			return not (type(map) == "table" and map[CMP.Media:PowerToken()])
+		end),
+	})
+	local d = CMP.Media:DefaultPowerColor("MANA")
+	powerColor.default = CreateColor(d.r, d.g, d.b, 1)
+	table.insert(list, powerColor)
+	table.insert(list, Bind(info, "powerTexture", {
+		kind = Type.Dropdown,
+		name = "Texture",
+		desc = "Default keeps Blizzard's.",
+		values = MediaValues("statusbar"),
+		height = 320,
+		hidden = collapsed,
+	}))
+	-- the cost of the spell being cast, shown on the power bar
+	local costTextures = MediaValues("statusbar")
+	table.insert(list, Bind(info, "costTexture", {
+		kind = Type.Dropdown,
+		name = "Cost Texture",
+		desc = "While you cast, the power bar shows the spell's cost as a separate piece. Default keeps Blizzard's texture.",
+		values = function()
+			local values = costTextures()
+			table.insert(values, 2, Option("Same as Power Bar", "power"))
+			return values
+		end,
+		height = 320,
+		hidden = collapsed,
+	}))
+	table.insert(list, Bind(info, "costColorMode", {
+		kind = Type.Dropdown,
+		name = "Cost Color",
+		desc = "The color of the spell's cost while you cast.\nBlizzard: its own color for your power type.\nLighter Power Color: a lighter shade of the power bar's color (follows a custom color).\nCustom: your own.",
+		values = {
+			Option("Blizzard", "default"),
+			Option("Lighter Power Color", "power"),
+			Option("Custom", "custom"),
+		},
+		hidden = collapsed,
+	}))
+	table.insert(list, ColorSetting(info, "costColor", INDENT .. "Custom", nil, Any(collapsed, function(layoutName)
+		return CMP:Get(info.key, "costColorMode", layoutName) ~= "custom"
+	end)))
+	table.insert(list, Bind(info, "fsr", {
+		kind = Type.Checkbox,
+		name = "Five-Second Rule",
+		desc = "After you spend mana, spirit-based mana regeneration pauses for 5 seconds. A spark runs across the mana bar during those 5 seconds, so you can see when regeneration resumes.",
+		hidden = collapsed,
+	}))
+end
+
 local function TextSettings(info, list)
-	local collapsed = Section(info, list, "text", "Text & Textures", false)
+	-- the Personal Resource Display's textures are in its Health Bar / Power Bar sections
+	local collapsed = Section(info, list, "text", info.kind == "prd" and "Text" or "Text & Textures", false)
 	local lsmNote = CMP.Media:LSM() and "" or "\n\nInstall SharedMedia (or any addon that ships LibSharedMedia) for more fonts."
 	table.insert(list, Bind(info, "font", {
 		kind = Type.Dropdown,
@@ -659,6 +795,8 @@ local function TextSettings(info, list)
 			},
 			hidden = keybindsOff,
 		}))
+	elseif info.kind == "prd" then
+		SizeSlider("textSize", "Text Size")
 	else
 		SizeSlider("textSize", "Text Size")
 		table.insert(list, Bind(info, "barTexture", {
@@ -688,13 +826,8 @@ function Settings:Register()
 			AttachSettings(info, list)
 			WidthSettings(info, list)
 			PRDBarSettings(info, list)
-			local collapsed = Section(info, list, "mana", "Mana", false)
-			table.insert(list, Bind(info, "fsr", {
-				kind = Type.Checkbox,
-				name = "Five-Second Rule",
-				desc = "After you spend mana, spirit-based mana regeneration pauses for 5 seconds. A spark runs across the mana bar during those 5 seconds, so you can see when regeneration resumes.",
-				hidden = collapsed,
-			}))
+			HealthBarSettings(info, list)
+			PowerBarSettings(info, list)
 			TextSettings(info, list)
 			if info.systemID then
 				LEM:AddSystemSettings(info.systemID, list)
@@ -931,6 +1064,20 @@ function Settings:KeepPanelOnScreen()
 	end
 	self.panelHooked = true
 	self:AddDragHandle(extension)
+	-- The panel is as wide as its widest row: sliders (343) are wider than dropdowns and
+	-- section headers (330), so opening a section changed the width. Keep it steady.
+	extension.minimumWidth = math.max(extension.minimumWidth or 0, PANEL_WIDTH)
+	-- "Reset To Default" resets the power color of your current power type only; the
+	-- other types' colors go too.
+	if type(extension.ResetSettings) == "function" then
+		hooksecurefunc(extension, "ResetSettings", function(panel)
+			local prd = CMP.byKey.PRD
+			if prd.systemID and panel.systemID == prd.systemID then
+				local layoutName = LEM.GetActiveLayoutName and LEM:GetActiveLayoutName() or nil
+				CMP:Set("PRD", "powerColors", false, layoutName)
+			end
+		end)
+	end
 	-- Mouse wheel scrolls the panel when it's taller than the screen.
 	extension:EnableMouseWheel(true)
 	extension:SetScript("OnMouseWheel", function(_, delta)

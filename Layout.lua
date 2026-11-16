@@ -57,6 +57,9 @@ function Layout:IsEngineActive(info)
 	if self.fit[info.frame] then
 		return true
 	end
+	if CMP.Custom:HasShown(info) then
+		return true -- our own icons are placed by us
+	end
 	if CMP:Get(key, "align") ~= "native" then
 		return true
 	end
@@ -133,6 +136,7 @@ function Layout:CanWrap(info)
 			count = count + 1
 		end
 	end
+	count = count + #CMP.Custom:Frames(info)
 	return count >= info.frame.stride
 end
 
@@ -192,7 +196,8 @@ local function CanTouchViewer(viewer)
 			return false
 		end
 	end
-	return true
+	local info = CMP.byFrame[viewer]
+	return info == nil or CMP.Custom:CanTouch(info)
 end
 
 function Layout:Run(info)
@@ -280,7 +285,8 @@ function Layout:Gaps(info, native, scale, edge)
 end
 
 -- Items that get a slot in the grid (see Place).
-local function CountSlots(viewer)
+local function CountSlots(info)
+	local viewer = info.frame
 	local count, first = 0, nil
 	for item in pairs(itemsByViewer[viewer]) do
 		if item.layoutIndex and item:GetParent() == viewer then
@@ -293,6 +299,10 @@ local function CountSlots(viewer)
 				first = first or item
 			end
 		end
+	end
+	for _, frame in ipairs(CMP.Custom:Frames(info)) do
+		count = count + 1
+		first = first or frame
 	end
 	return count, first
 end
@@ -311,13 +321,13 @@ function Layout:ComputeFit(info)
 	if not width or width <= 0 then
 		return
 	end
-	local total, first = CountSlots(viewer)
+	local total, first = CountSlots(info)
 	if total == 0 or not first then
 		return
 	end
 	local stride = viewer.stride
-	if not stride or stride < 1 then
-		stride = total
+	if not stride or stride < 1 or info.buffs then
+		stride = total -- buff rows never wrap (our custom buffs widen the row)
 	end
 	local perLine = math.min(stride, total)
 	local base = BaseWidth(first)
@@ -350,12 +360,16 @@ end
 
 function Layout:RunUnsafe(info)
 	local viewer = info.frame
+	CMP.Custom:Sync(info)
 	self:ComputeFit(info)
 	if info.kind == "icons" then
 		for item in pairs(itemsByViewer[viewer]) do
 			if item.layoutIndex then
 				self:ApplyItemScale(info, item)
 			end
+		end
+		for _, frame in ipairs(CMP.Custom:Frames(info)) do
+			self:ApplyItemScale(info, frame)
 		end
 	end
 	if self:IsEngineActive(info) then
@@ -367,6 +381,10 @@ function Layout:RunUnsafe(info)
 		self:Place(info, true)
 	else
 		self:StoreNativeContent(info)
+	end
+	-- A viewer in its default place keeps Blizzard's layout: our icons continue its grid.
+	if self:IsGeometryLocked(info) and CMP.Custom:HasShown(info) then
+		self:Place(info, true, true)
 	end
 	-- Borders depend on the (possibly new) item scale.
 	CMP.Skin:RefreshViewer(info)
@@ -396,15 +414,23 @@ function Layout:SetItemExtraWidth(info, item, extra)
 	end
 end
 
+-- Our custom icons carry sortMajor (the layoutIndex they follow) and sortMinor.
 local function ByLayoutIndex(a, b)
-	return a.layoutIndex < b.layoutIndex
+	local am, bm = a.sortMajor or a.layoutIndex, b.sortMajor or b.layoutIndex
+	if am ~= bm then
+		return am < bm
+	end
+	return (a.sortMinor or 0) < (b.sortMinor or 0)
 end
 
 -- native = true reproduces Blizzard's GridLayout exactly (used to undo our changes).
-function Layout:Place(info, native)
+-- customOnly = true (with native): only our custom icons are placed, after Blizzard's,
+-- for viewers whose geometry stays Blizzard's.
+function Layout:Place(info, native, customOnly)
 	local viewer = info.frame
 	local key = info.key
 	local collapse = not native and self:ClosesGaps(info)
+	local customs = CMP.Custom:Frames(info)
 
 	-- slots: what the grid reserves room for. placed: what we position.
 	local slots, placed = {}, {}
@@ -417,12 +443,19 @@ function Layout:Place(info, native)
 			local hasCooldown = item.GetCooldownID and item:GetCooldownID() ~= nil
 			-- Blizzard pads the grid to at least two slots with empty items. Keep those
 			-- only when reproducing the native layout.
-			if native or shown or hasCooldown then
+			if (native and not customOnly) or shown or hasCooldown then
 				slots[#slots + 1] = item
 				if native or shown or not collapse then
 					placed[#placed + 1] = item
 				end
 			end
+		end
+	end
+	if #customs > 0 then
+		CMP.Custom:AssignOrder(info, customOnly)
+		for _, frame in ipairs(customs) do
+			slots[#slots + 1] = frame
+			placed[#placed + 1] = frame
 		end
 	end
 
@@ -442,7 +475,9 @@ function Layout:Place(info, native)
 
 	local horizontal = viewer.isHorizontal ~= false
 	local stride = viewer.stride
-	if not stride or stride < 1 then
+	-- Buff rows are one row (or column): Blizzard's stride there is its own icon count, so
+	-- our custom buffs would wrap into a row of their own.
+	if not stride or stride < 1 or info.buffs then
 		stride = #slots
 	end
 	-- Transparent edge of Blizzard's icon art (viewer units): items overhang the frame by
@@ -525,8 +560,10 @@ function Layout:Place(info, native)
 			if not native then
 				x, y = CMP.Snap(x, viewer), CMP.Snap(y, viewer)
 			end
-			raw.ClearAllPoints(item)
-			raw.SetPoint(item, "TOPLEFT", viewer, "TOPLEFT", x / scale, y / scale)
+			if not customOnly or item.isCustom then
+				raw.ClearAllPoints(item)
+				raw.SetPoint(item, "TOPLEFT", viewer, "TOPLEFT", x / scale, y / scale)
+			end
 			local itemWidth = horizontal and columns[slot] or width
 			minX, maxX = math.min(minX, x), math.max(maxX, x + itemWidth)
 			minY, maxY = math.min(minY, y - height), math.max(maxY, y)
@@ -535,6 +572,9 @@ function Layout:Place(info, native)
 
 	-- Keep the frame at the size of the full grid, so its center (and the Edit Mode
 	-- selection) stays put while buffs come and go.
+	if customOnly then
+		return -- the frame and its content size stay Blizzard's
+	end
 	local frameWidth = (horizontal and extentPrimary or extentSecondary) - 2 * edge
 	local frameHeight = (horizontal and extentSecondary or extentPrimary) - 2 * edge
 	if not CMP:IsManagedDefault(viewer) then

@@ -72,7 +72,8 @@ local function AddMenu(owner, rootDescription)
 end
 
 -- Border color / size / reset entries for one spell, added to any menu description.
-function SpellMenu:AddStyleEntries(rootDescription, spellID)
+-- bordersOnly: just the border entries (our custom icons, which have no buff or lockout).
+function SpellMenu:AddStyleEntries(rootDescription, spellID, bordersOnly)
 	local colorMenu = rootDescription:CreateButton("Border Color")
 	colorMenu:CreateRadio(DEFAULT or "Default", function()
 		return CurrentStyle(spellID).color == nil
@@ -103,6 +104,16 @@ function SpellMenu:AddStyleEntries(rootDescription, spellID)
 		end, function()
 			CMP:SetSpellStyle(spellID, "size", size)
 		end)
+	end
+
+	if bordersOnly then
+		local resetBorder = rootDescription:CreateButton("Reset Border", function()
+			CMP:SetSpellStyle(spellID, "color", nil)
+			CMP:SetSpellStyle(spellID, "size", nil)
+		end)
+		local style = CMP:GetSpellStyle(spellID)
+		resetBorder:SetEnabled(style ~= nil and (style.color ~= nil or style.size ~= nil))
+		return
 	end
 
 	-- Spells that put a buff on you show the buff's duration on their cooldown icon.

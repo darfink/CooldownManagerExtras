@@ -119,6 +119,16 @@ CMP.defaults = {
 	countSize = 0, -- icons: charges and stacks
 	textSize = 0, -- bars and Personal Resource Display
 	barTexture = "default",
+	-- Personal Resource Display: each bar's color and texture ("default" = Blizzard's)
+	healthColorMode = "default", -- default | class | custom
+	healthColor = { r = 0, g = 0.8, b = 0, a = 1 },
+	healthTexture = "default",
+	powerColors = false, -- { [power token] = color }: custom color per power type
+	powerTexture = "default",
+	-- the cost of the spell you're casting, shown on the power bar
+	costTexture = "default", -- default (Blizzard's) | power (as the power bar) | texture name
+	costColorMode = "default", -- default | power (a lighter power bar color) | custom
+	costColor = { r = 1, g = 1, b = 1, a = 0.6 },
 	-- keybind text on icons
 	keybinds = false,
 	keybindSize = 0, -- 0 = automatic
@@ -142,6 +152,28 @@ local function Copy(value)
 	return result
 end
 CMP.Copy = Copy
+
+-- 0.1 had one Bar Texture for all Personal Resource Display bars; now the health and power
+-- bars have their own. A texture set before goes to both.
+function CMP.MigratePRD(settings)
+	if type(settings) ~= "table" then
+		return
+	end
+	local shared = settings.barTexture
+	if shared ~= nil and shared ~= "default" then
+		if settings.healthTexture == nil or settings.healthTexture == "same" then
+			settings.healthTexture = shared
+		end
+		if settings.powerTexture == nil then
+			settings.powerTexture = shared
+		end
+	end
+	settings.barTexture = nil
+	if settings.healthTexture == "same" then
+		settings.healthTexture = nil
+	end
+	settings.powerTextures = nil -- (an unreleased per-power-type version)
+end
 
 function CMP:LayoutName()
 	return self.activeLayout
@@ -337,6 +369,11 @@ function CMP:Update()
 	if not self.ready then
 		return
 	end
+	self.CustomSettings:Start() -- Blizzard's settings window may load after us
+	if CooldownViewerSettings and CooldownViewerSettings:IsShown() then
+		-- profile / layout switches, imports and resets change the custom tiles too
+		self.Safe(self.CustomSettings.Refresh, self.CustomSettings)
+	end
 	for _, info in ipairs(self.frameInfos) do
 		if info.frame and info.kind ~= "prd" then
 			self.Layout:Run(info) -- applies scale, places items, then refreshes the skin
@@ -412,11 +449,14 @@ local function CheckReady()
 	if CMP.ready and not wasReady then
 		CMP.Profiles.lastActive = CMP.Profiles:ActiveName()
 		CMP.Media:WatchLSM()
+		CMP.Media:WatchPower()
 		CMP.Masque:Start()
 		CMP.Keybinds:Start()
 		CMP.Mana:Start()
 		CMP.Timers:Start()
 		CMP.Lockouts:Start()
+		CMP.Custom:Start()
+		CMP.CustomSettings:Start()
 		CMP:Update()
 		-- Cooldown data and sizes settle a moment after login; run once more.
 		C_Timer.After(1, function() CMP:Update() end)
@@ -441,6 +481,12 @@ events:SetScript("OnEvent", function(_, event, arg1)
 			db.profiles = db.profiles or {}
 			db.chars = db.chars or {}
 			-- 0.1 "Screen (keep center fixed)" became Grow From: Center.
+			for _, layout in pairs(db.layouts) do
+				CMP.MigratePRD(layout.PRD)
+			end
+			for _, profile in pairs(db.profiles) do
+				CMP.MigratePRD(profile.frames and profile.frames.PRD)
+			end
 			for _, layout in pairs(db.layouts) do
 				for _, settings in pairs(layout) do
 					if settings.attachTo == "screen" then
@@ -570,6 +616,9 @@ SlashCmdList.COOLDOWNMANAGEREXTRAS = function(msg)
 		end
 	elseif msg == "probe" then
 		CMP.Diagnostics:Probe()
+	elseif msg:match("^probe%s") or msg == "probe aura" then
+		local kind, arg = msg:match("^probe%s+(%a+)%s*(.-)$")
+		CMP.Diagnostics:ProbeOne(kind, arg)
 	elseif msg == "rings" then
 		CMP.Skin:ReportRings()
 	elseif msg == "timers" then
@@ -593,6 +642,7 @@ SlashCmdList.COOLDOWNMANAGEREXTRAS = function(msg)
 		print("  /cme profile [name|none] - list or switch this character's profile")
 		print("  /cme status - show what the addon sees")
 		print("  /cme probe - can addons read your tracked auras right now? (try it in combat)")
+		print("  /cme probe spell|item|slot|aura <id> - can addons read this cooldown or buff right now? (try it in combat)")
 		print("  /cme timers - what the debuff timers see right now (try it when one is missing)")
 		print("  /cme rings - what the addon can read from the debuff-type rings")
 		print("  /cme blocked - list \"Interface action failed\" events and the addon the game blamed")

@@ -148,42 +148,63 @@ local function ringCopy(item, atlas)
 end
 local MAGIC = "ui-debuff-border-magic-noicon"
 
-T.test("skin: square icons hide Blizzard's debuff ring and show its art on the square edge", function(H, T)
+local function borderColor(item, H)
+	local border = borderFrame(item, H)
+	if not (border and border:IsShown()) then return nil end
+	return regionsOf(border, "Texture")[1]:_colorTexture()
+end
+
+T.test("skin: square icons hide Blizzard's debuff ring and color the square border instead", function(H, T)
 	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
 	debuffRing(H, item, MAGIC)
 	H.CMP:Set("BuffIcon", "style", "square")
 	T.eq(item.DebuffBorder:GetAlpha(), 0, "Blizzard's ring hidden")
-	local copy = ringCopy(item, MAGIC)
-	T.truthy(copy and copy:IsShown(), "our copy shows the same art")
+	T.falsy(ringCopy(item, MAGIC), "no copy of the round art")
+	local r, g, b = borderColor(item, H)
+	T.truthy(b and b > 0.9 and r < 0.5, "border is Magic blue")
 	H.CMP:Set("BuffIcon", "style", "blizzard")
 	T.eq(item.DebuffBorder:GetAlpha(), 1, "ring back")
-	T.falsy(copy:IsShown(), "copy gone")
 end)
 
-T.test("skin: no debuff (ring hidden) = no copy", function(H, T)
+T.test("skin: no debuff (ring hidden) = normal border", function(H, T)
 	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
 	debuffRing(H, item, MAGIC)
 	item.DebuffBorder:Hide()
 	H.CMP:Set("BuffIcon", "style", "square")
-	local copy = ringCopy(item, MAGIC)
-	T.falsy(copy and copy:IsShown())
+	T.falsy(ringCopy(item, MAGIC))
+	local r, g, b = borderColor(item, H)
+	T.truthy(r == nil or b < 0.5, "not blue")
 end)
 
-T.test("skin: the ring copy works when the atlas is secret (combat)", function(H, T)
+T.test("skin: in combat (secret atlas) the type learned out of combat colors the border", function(H, T)
 	local item = H.viewers.BuffIcon:AddItem({ spellID = 589 })
 	debuffRing(H, item, MAGIC)
-	local texture = item.DebuffBorder.Texture
-	local get = texture.GetAtlas
-	H.secretReturn(texture, "GetAtlas", "whole")
+	H.CMP:Set("BuffIcon", "style", "square") -- learns 589 = magic
+	H.secretReturn(item.DebuffBorder.Texture, "GetAtlas", "whole")
+	H.CMP.Skin:ApplyItem(H.CMP.byKey.BuffIcon, item)
+	local r, g, b = borderColor(item, H)
+	T.truthy(b and b > 0.9 and r < 0.5, "still Magic blue")
+	T.eq(H.CMP.db.debuffTypes[589], "magic", "saved")
+end)
+
+T.test("skin: a debuff never seen out of combat (secret atlas) gets the normal square border, no round art", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 590 })
+	debuffRing(H, item, MAGIC)
+	H.secretReturn(item.DebuffBorder.Texture, "GetAtlas", "whole")
 	H.CMP:Set("BuffIcon", "style", "square")
-	T.eq(item.DebuffBorder:GetAlpha(), 0)
-	local shown = false
-	for _, child in ipairs({ item:GetChildren() }) do
-		if child ~= item.DebuffBorder and child:GetObjectType() == "Frame" and #regionsOf(child, "Texture") == 1 and child:IsShown() then
-			shown = true
-		end
-	end
-	T.truthy(shown, "copy shown from the secret atlas")
+	T.eq(item.DebuffBorder:GetAlpha(), 0, "Blizzard's ring hidden")
+	T.falsy(ringCopy(item, MAGIC))
+	local r, g, b = borderColor(item, H)
+	T.eq(r, 0, "normal (black) border")
+	T.eq(b, 0)
+end)
+
+T.test("skin: the 'None' debuff type (default art) gets its own color", function(H, T)
+	local item = H.viewers.BuffIcon:AddItem({ spellID = 591 })
+	debuffRing(H, item, "ui-debuff-border-default-noicon")
+	H.CMP:Set("BuffIcon", "style", "square")
+	local r, g, b = borderColor(item, H)
+	T.truthy(r and r > 0.5 and b < 0.2, "red")
 end)
 
 T.test("skin: /cme rings reports without raising, also with secret atlases", function(H, T)

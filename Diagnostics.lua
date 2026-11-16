@@ -118,3 +118,137 @@ function Diagnostics:Probe()
 		print("  No active tracked auras.")
 	end
 end
+
+-- /cme probe spell|item|slot|aura <id>: what addons may read about one cooldown or buff
+-- right now, and whether our own cooldown widgets accept it. Run it in and out of combat:
+-- it decides what custom entries (Custom.lua) can show.
+local GOOD, BAD = "|cff60ff60ok|r", "|cffff6060refused|r"
+
+local function Values(ok, ...)
+	if not ok then
+		return "|cffff6060error|r"
+	end
+	local parts = {}
+	for i = 1, select("#", ...) do
+		parts[i] = Show((select(i, ...)))
+	end
+	return #parts > 0 and table.concat(parts, ", ") or "-"
+end
+
+local function Fields(value, names)
+	if CMP.IsSecret(value) or type(value) ~= "table" then
+		return Show(value)
+	end
+	local parts = {}
+	for _, name in ipairs(names) do
+		table.insert(parts, name .. "=" .. Show(value[name]))
+	end
+	return table.concat(parts, " ")
+end
+
+local testCooldown
+local function TestWidget(method, ...)
+	testCooldown = testCooldown or CreateFrame("Cooldown", nil, UIParent)
+	local ok = pcall(testCooldown[method], testCooldown, ...)
+	testCooldown:Clear()
+	return ok and GOOD or BAD
+end
+
+local function Call(fn, ...)
+	if type(fn) ~= "function" then
+		return false
+	end
+	return pcall(fn, ...)
+end
+
+function Diagnostics:ProbeOne(kind, arg)
+	local id = tonumber(arg)
+	if not id and kind == "spell" and arg ~= "" then
+		local ok, info = Call(C_Spell and C_Spell.GetSpellInfo, arg)
+		id = ok and type(info) == "table" and info.spellID or nil
+	elseif not id and kind == "item" and arg ~= "" then
+		local ok, itemID = Call(C_Item and C_Item.GetItemInfoInstant, arg)
+		id = ok and type(itemID) == "number" and itemID or nil
+	end
+	if kind == "aura" and not id then
+		-- no ID: list your buffs, to find the one to probe
+		CMP:Print(("Your buffs and debuffs (in combat: %s):"):format(InCombatLockdown() and "|cffffd100yes|r" or "no"))
+		local any = false
+		for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
+			local label = filter == "HELPFUL" and "|cff60ff60buff|r" or "|cffff6060debuff|r"
+			for index = 1, 40 do
+				local ok, data = Call(C_UnitAuras and C_UnitAuras.GetAuraDataByIndex, "player", index, filter)
+				if not ok or data == nil then
+					break
+				end
+				any = true
+				print("  " .. label .. " " .. Fields(data, { "name", "spellId", "duration", "isFromPlayerOrPlayerPet" }))
+			end
+		end
+		if not any then
+			print("  none readable")
+		end
+		return
+	end
+	if not id or not (kind == "spell" or kind == "item" or kind == "slot" or kind == "aura") then
+		CMP:Print("Usage: /cme probe spell <id or name> | item <id> | slot <13 or 14> | aura <spell id>")
+		return
+	end
+	CMP:Print(("Probe %s %d (in combat: %s):"):format(kind, id, InCombatLockdown() and "|cffffd100yes|r" or "no"))
+	if kind == "spell" then
+		print("  name: " .. Values(Call(C_Spell and C_Spell.GetSpellName, id)))
+		print("  known: " .. Values(Call(IsPlayerSpell, id)))
+		local ok, cd = Call(C_Spell and C_Spell.GetSpellCooldown, id)
+		print("  GetSpellCooldown: " .. (ok and Fields(cd, { "startTime", "duration", "isEnabled", "isOnGCD" }) or "error"))
+		if ok and type(cd) == "table" and not CMP.IsSecret(cd) then
+			print("    -> our cooldown widget: " .. TestWidget("SetCooldown", cd.startTime, cd.duration))
+		end
+		local okDuration, duration = Call(C_Spell and C_Spell.GetSpellCooldownDuration, id, true)
+		print("  GetSpellCooldownDuration: " .. (okDuration and (duration ~= nil and "object" or "-") or "error")
+			.. (okDuration and duration ~= nil and (" -> our cooldown widget: " .. TestWidget("SetCooldownFromDurationObject", duration, true)) or ""))
+		local okCharges, charges = Call(C_Spell and C_Spell.GetSpellCharges, id)
+		print("  GetSpellCharges: " .. (okCharges and Fields(charges, { "currentCharges", "maxCharges" }) or "error"))
+	elseif kind == "item" then
+		print("  name: " .. Values(Call(C_Item and C_Item.GetItemNameByID, id)))
+		print("  count: " .. Values(Call(C_Item and C_Item.GetItemCount, id, false, true)))
+		local fn = (C_Item and C_Item.GetItemCooldown) or GetItemCooldown
+		local results = { Call(fn, id) }
+		print("  GetItemCooldown (start, duration, enable): " .. Values(unpack(results)))
+		if results[1] then
+			print("    -> our cooldown widget: " .. TestWidget("SetCooldown", results[2], results[3]))
+		end
+	elseif kind == "slot" then
+		print("  item: " .. Values(Call(GetInventoryItemID, "player", id)))
+		local results = { Call(GetInventoryItemCooldown, "player", id) }
+		print("  GetInventoryItemCooldown (start, duration, enable): " .. Values(unpack(results)))
+		if results[1] then
+			print("    -> our cooldown widget: " .. TestWidget("SetCooldown", results[2], results[3]))
+		end
+	elseif kind == "aura" then
+		local ok, aura = Call(C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID, id)
+		if not ok then
+			print("  GetPlayerAuraBySpellID: error")
+		elseif aura == nil then
+			print("  GetPlayerAuraBySpellID: nothing (not on you, or hidden from addons)")
+		else
+			print("  GetPlayerAuraBySpellID: " .. Fields(aura, { "spellId", "auraInstanceID", "duration", "expirationTime", "applications" }))
+			local instance = not CMP.IsSecret(aura) and type(aura) == "table" and aura.auraInstanceID or nil
+			if instance ~= nil and not CMP.IsSecret(instance) then
+				local okDuration, duration = Call(C_UnitAuras.GetAuraDuration, "player", instance)
+				print("  GetAuraDuration: " .. (okDuration and duration ~= nil and ("object -> our cooldown widget: " .. TestWidget("SetCooldownFromDurationObject", duration, true)) or "refused"))
+			end
+		end
+		local readable, total = 0, 0
+		for index = 1, 40 do
+			local okIndex, data = Call(C_UnitAuras and C_UnitAuras.GetAuraDataByIndex, "player", index, "HELPFUL")
+			if not okIndex or data == nil then
+				break
+			end
+			total = total + 1
+			if not CMP.IsSecret(data) and type(data) == "table" and not CMP.IsSecret(data.spellId) then
+				readable = readable + 1
+			end
+		end
+		print(("  your buffs: %d listed, %d with a readable spell ID"):format(total, readable))
+	end
+end

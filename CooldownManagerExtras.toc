@@ -27,7 +27,9 @@ Overlay.lua
 Keybinds.lua
 Timers.lua
 Lockouts.lua
+Custom.lua
 Mana.lua
 Settings.lua
 SpellMenu.lua
+CustomSettings.lua
 Options.lua

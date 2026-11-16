@@ -256,7 +256,57 @@ local SCHEMA = {
 	whenHidden = { "keep", "fill" },
 	debuffTimers = "boolean",
 	fsr = "boolean",
+	custom = "custom", -- Essential / Utility / Tracked Buffs: your own entries (Custom.lua)
+	healthColorMode = { "default", "class", "custom" },
+	healthColor = "color",
+	healthTexture = "string",
+	powerColors = "colormap", -- { [power token] = color }
+	powerTexture = "string",
+	costTexture = "string",
+	costColorMode = { "default", "power", "custom" },
+	costColor = "color",
 }
+
+-- { [power token] = value } with only valid tokens and values.
+local function CleanMap(value, clean)
+	if type(value) ~= "table" then
+		return nil
+	end
+	local result, count = {}, 0
+	for token, item in pairs(value) do
+		if type(token) == "string" and token:match("^[%u_]+$") and #token <= 40 then
+			local v = clean(item)
+			if v ~= nil then
+				result[token] = v
+				count = count + 1
+			end
+		end
+	end
+	return count > 0 and result or nil
+end
+
+local CUSTOM_KINDS = { spell = true, item = true, slot = true, aura = true }
+
+local function CleanCustom(value)
+	if type(value) ~= "table" then
+		return nil
+	end
+	local list = {}
+	for _, entry in ipairs(value) do
+		if type(entry) == "table" and CUSTOM_KINDS[entry.kind] and type(entry.id) == "number"
+			and entry.id >= 1 and entry.id < 100000000 then
+			local pos = entry.pos
+			if not (pos == "start" or (type(pos) == "number" and pos >= 1 and pos < 100000000)) then
+				pos = nil
+			end
+			table.insert(list, { kind = entry.kind, id = math.floor(entry.id), pos = pos, always = entry.always == true or nil })
+			if #list >= 50 then
+				break
+			end
+		end
+	end
+	return #list > 0 and list or nil
+end
 
 local function OneOf(list, value)
 	for _, allowed in ipairs(list) do
@@ -274,6 +324,12 @@ local function CleanSetting(field, value)
 		return nil
 	elseif rule == "color" then
 		return CleanColor(value)
+	elseif rule == "custom" then
+		return CleanCustom(value)
+	elseif rule == "colormap" then
+		return CleanMap(value, CleanColor)
+	elseif rule == "stringmap" then
+		return CleanMap(value, function(v) return type(v) == "string" and #v <= 200 and v or nil end)
 	elseif rule == "boolean" then
 		if type(value) == "boolean" then
 			return value
@@ -380,6 +436,7 @@ function Share:Read(text)
 		return nil, "That export is from a newer version of Cooldown Manager Extras; update the addon first."
 	end
 	local frames, frameCount = CleanFrames(data.frames)
+	CMP.MigratePRD(frames.PRD) -- exports from 0.1: one Bar Texture for all bars
 	local spells, spellCount = CleanSpells(data.spells)
 	return {
 		name = type(data.name) == "string" and data.name:sub(1, 40) or nil,

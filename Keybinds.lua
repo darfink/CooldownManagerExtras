@@ -166,6 +166,9 @@ function Keybinds:TextFor(item)
 			return bySpell[id].text
 		end
 	end
+	if info.itemID and byItem[info.itemID] then -- our custom item icons
+		return byItem[info.itemID].text
+	end
 	if info.equipSlot then
 		local itemID = GetInventoryItemID("player", info.equipSlot)
 		if itemID and byItem[itemID] then

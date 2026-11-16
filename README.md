@@ -20,10 +20,21 @@ Made for WoW Forever.
   wide as another one.
 - **Square icons:** pixel-exact borders, icon zoom, and square cooldown swipes. Debuff-type
   colors (Magic, Curse, ...) stay visible.
+- **Custom spells and items:** add your own spells, items (potions, healthstones) and
+  trinket slots to Essential or Utility Cooldowns, with the + tile in Cooldown Settings or
+  by dropping a spell or item on it. They show in the same row as Blizzard's icons, at the
+  place you pick, in the same look. Potions can stay visible with none left in your bags.
+- **Custom buffs in Tracked Buffs:** add any buff, also ones other players give you (pick
+  from the buffs seen on you). Shown while it is on you. When the game hides a buff from
+  add-ons in combat, a buff you start yourself (trinket, potion, spell) is timed from your
+  cast instead.
 - **Per-spell borders:** right-click a spell in Cooldown Settings to give it its own
   border color.
 - **Fonts and textures:** timer and count fonts, Tracked Bars and Personal Resource Display
   bar textures (LibSharedMedia and Blizzard textures), square bar style.
+- **Personal Resource Display bars:** the health and power bars each get their own
+  texture; health in class color or your own; each power type (Mana, Rage, Energy, ...)
+  its own color; the cast cost preview's texture and color.
 - **Debuff timers:** Tracked Buffs show a timer on debuffs such as Weakened Soul, also in
   combat.
 - **Show cooldown, not buff duration:** per spell, for spells that put a buff on you.
@@ -40,6 +51,8 @@ Made for WoW Forever.
 - `/cme` lists the commands. `/cme options` opens profiles and import/export.
 - `/cme status`, `/cme probe`, `/cme timers`, `/cme rings` and `/cme blocked` print what
   the add-on sees, for bug reports.
+- `/cme probe spell|item|slot|aura <id>` shows what the game lets add-ons read about one
+  cooldown or buff right now. Run it in combat.
 
 `/cmp` works too.
 

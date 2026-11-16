@@ -42,10 +42,13 @@ end
 
 -- Debuffs (Tracked Buffs, Tracked Bars): Blizzard rings the icon in the debuff type's color
 -- (Magic blue, Curse purple, ...), 3 units past the icon on each side: made for round
--- icons, it sticks out of square ones. Square style hides that ring and shows the same art
--- on our own texture, exactly on the square icon. In combat the game hides which art it
--- is (the atlas name is secret), but our texture can still be given it: SetAtlas takes
--- secret values from addons, so this works in and out of combat with no lookup of ours.
+-- icons, it sticks out of square ones. Square style hides that ring and draws our own
+-- square border in the debuff type's color instead. The type is read from the ring's art
+-- (atlas "ui-debuff-border-<type>-noicon"). In combat the game hides the atlas name, so
+-- the type is learned per spell out of combat (a spell's debuff type doesn't change) and
+-- used from there. A debuff not seen out of combat yet (your own DoTs are only ever up in
+-- combat) gets the normal border; a per-spell border color (right-click it in Cooldown
+-- Settings) sets one for good.
 local function Plain(value)
 	return not CMP.IsSecret(value) and value ~= nil -- secret check first
 end
@@ -69,35 +72,61 @@ local function RingAtlas(item)
 	return atlas
 end
 
-local function UpdateRingCopy(target, item, state, show)
-	local atlas = show and RingAtlas(item)
-	if not atlas then
-		if state.ringCopy then
-			state.ringCopy:Hide()
+-- Debuff type colors, as Blizzard's DebuffTypeColor where the client has it.
+local DEBUFF_COLORS = {
+	magic = { r = 0.20, g = 0.60, b = 1.00 },
+	curse = { r = 0.60, g = 0.00, b = 1.00 },
+	disease = { r = 0.60, g = 0.40, b = 0.00 },
+	poison = { r = 0.00, g = 0.60, b = 0.00 },
+	bleed = { r = 1.00, g = 0.20, b = 0.40 },
+	none = { r = 0.80, g = 0.00, b = 0.00 },
+}
+-- Never thinner than this, so the color can be seen next to a 1-pixel black border.
+local DEBUFF_BORDER_PIXELS = 2
+
+local function DebuffTypeColorOf(kind)
+	local blizzard = type(DebuffTypeColor) == "table" and kind
+		and DebuffTypeColor[kind:sub(1, 1):upper() .. kind:sub(2)]
+	if type(blizzard) == "table" and type(blizzard.r) == "number" then
+		return blizzard
+	end
+	return kind and DEBUFF_COLORS[kind]
+end
+
+-- spellID -> debuff type ("magic", ...), the same for every character.
+local unsavedTypes = {}
+local function LearnedTypes()
+	local db = CMP.db
+	if not db then
+		return unsavedTypes
+	end
+	db.debuffTypes = db.debuffTypes or {}
+	for id, kind in pairs(unsavedTypes) do
+		db.debuffTypes[id] = kind
+	end
+	wipe(unsavedTypes)
+	return db.debuffTypes
+end
+
+-- For a shown ring: the debuff type's color, or nil while the type is unknown.
+local function DebuffRingColor(item)
+	local atlas = RingAtlas(item)
+	if not CMP.IsSecret(atlas) and atlas == nil then -- secret check first
+		return nil
+	end
+	local spell = CMP:GetItemSpellID(item)
+	if not CMP.IsSecret(atlas) then
+		local kind = type(atlas) == "string" and atlas:lower():match("^ui%-debuff%-border%-(%a+)")
+		if kind == "default" then
+			kind = "none"
 		end
-		return
-	end
-	local copy = state.ringCopy
-	if not copy then
-		copy = CreateFrame("Frame", nil, target)
-		copy:SetAllPoints(target)
-		-- above the icon, the cooldown swipe and Blizzard's ring; below our pixel border
-		local level = target:GetFrameLevel()
-		for _, child in ipairs({ state.cooldown, item.DebuffBorder }) do
-			if child and child.GetFrameLevel then
-				level = math.max(level, child:GetFrameLevel())
-			end
+		local color = DebuffTypeColorOf(kind)
+		if color and spell then
+			LearnedTypes()[spell] = kind
 		end
-		copy:SetFrameLevel(level + 1)
-		copy.texture = copy:CreateTexture(nil, "OVERLAY")
-		copy.texture:SetAllPoints()
-		state.ringCopy = copy
+		return color
 	end
-	if pcall(copy.texture.SetAtlas, copy.texture, atlas) then
-		copy:Show()
-	else
-		copy:Hide()
-	end
+	return spell and DebuffTypeColorOf(LearnedTypes()[spell]) or nil
 end
 
 -- /cme rings: what we can read from Blizzard's debuff rings right now.
@@ -118,15 +147,13 @@ function Skin:ReportRings()
 					local okFile, file = pcall(texture.GetTexture, texture)
 					local okColor, r, g, b = pcall(texture.GetVertexColor, texture)
 					local spell = CMP:GetItemSpellID(item)
-					local state = states[info.kind == "bars" and item.Icon or item]
-					local copy = state and state.ringCopy
-					local copied = copy and Visible(copy) and "ours shown" or "ours hidden"
 					if not (okShown and not CMP.IsSecret(shown) and shown == false) then
 						count = count + 1
-						print(("  %s %s: shown=%s atlas=%s texture=%s tint=%s,%s,%s -> %s"):format(
+						local learned = spell and LearnedTypes()[spell]
+						print(("  %s %s: shown=%s atlas=%s texture=%s tint=%s,%s,%s learned=%s"):format(
 							info.key, Show(spell), okShown and Show(shown) or "error", okAtlas and Show(atlas) or "error",
 							okFile and Show(file) or "error", okColor and Show(r) or "error", Show(g), Show(b),
-							copied))
+							tostring(learned)))
 					end
 				end
 			end
@@ -291,7 +318,6 @@ function Skin:ApplyItem(info, item)
 		-- drawn on our own frame above the icon.
 		state.square = false
 		SetRingHidden(item, state, false)
-		UpdateRingCopy(target, item, state, false)
 		if spellStyle and spellStyle.color then
 			LayoutBorder(EnsureBorder(target, state), spellStyle.size or 2, spellStyle.color)
 		elseif state.border then
@@ -328,15 +354,19 @@ function Skin:ApplyItem(info, item)
 		end
 		WatchDebuffRing(info, item, state)
 		SetRingHidden(item, state, true)
-		-- a spell's own border color wins over the debuff type's
-		UpdateRingCopy(target, item, state, not (spellStyle and spellStyle.color))
-		local color = spellStyle and spellStyle.color or CMP:Get(key, "borderColor")
+		local color = spellStyle and spellStyle.color
 		local size = spellStyle and spellStyle.size or CMP:Get(key, "borderSize")
+		if not color then -- a spell's own border color wins over the debuff type's
+			local debuffColor = DebuffRingColor(item)
+			if debuffColor then
+				color, size = debuffColor, math.max(size or 0, DEBUFF_BORDER_PIXELS)
+			end
+		end
+		color = color or CMP:Get(key, "borderColor")
 		LayoutBorder(EnsureBorder(target, state), size, color)
 	else
 		state.square = false
 		SetRingHidden(item, state, false)
-		UpdateRingCopy(target, item, state, false)
 		if state.mask and not state.masked then
 			icon:AddMaskTexture(state.mask)
 			state.masked = true
@@ -391,6 +421,7 @@ function Skin:RefreshViewer(info)
 			CMP.Safe(CMP.Lockouts.UpdateItem, CMP.Lockouts, info, item)
 		end
 	end
+	CMP.Custom:RefreshStyles(info)
 end
 
 function Skin:RefreshAll()

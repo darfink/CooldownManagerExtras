@@ -87,6 +87,27 @@ T.test("media: a bar texture is applied through the StatusBar API and 'default' 
 	T.eq(texture:GetAtlas(), "UI-HUD-CoolDownManager-Bar", "Blizzard's atlas is back")
 end)
 
+T.test("media: PRD bars desaturate Blizzard's colored atlases so the health/mana tint is clean", function(H, T)
+	local prd = H.viewers.PRD
+	local bar = prd.PowerBar
+	H.atlases["ui-castingbar-filling-standard"] = true
+	H.CMP:Set("PRD", "powerTexture", "Blizzard: Cast Bar")
+	T.eq(bar:GetStatusBarTexture():GetAtlas(), "ui-castingbar-filling-standard")
+	T.truthy(bar:GetStatusBarTexture():IsDesaturated(), "gray, tinted by the PRD")
+	H.CMP:Set("PRD", "powerTexture", "Blizzard: Flat")
+	T.falsy(bar:GetStatusBarTexture():IsDesaturated(), "plain textures untouched")
+	H.CMP:Set("PRD", "powerTexture", "Blizzard: Cast Bar")
+	H.CMP:Set("PRD", "powerTexture", "default")
+	T.falsy(bar:GetStatusBarTexture():IsDesaturated(), "default restores")
+end)
+
+T.test("media: Tracked Bars keep Blizzard's colored atlases as they are", function(H, T)
+	local item = H.viewers.BuffBar:AddItem({ spellID = 100 })
+	H.atlases["ui-castingbar-filling-standard"] = true
+	H.CMP:Set("BuffBar", "barTexture", "Blizzard: Cast Bar")
+	T.falsy(item:GetBarFrame():GetStatusBarTexture():IsDesaturated())
+end)
+
 T.test("media: fonts: size and outline apply to the timer text and 'default' restores them", function(H, T)
 	local item = H.viewers.Essential:AddItem({ spellID = 100 })
 	local timer = item.Cooldown:GetCountdownFontString()
