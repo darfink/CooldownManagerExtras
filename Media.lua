@@ -220,14 +220,55 @@ end
 -- custom color is put back right after each of those calls (a secure post-hook; only the
 -- widget's C method is called), and Blizzard's last color is restored when it's removed.
 
+-- Shading: a vertical gradient over the fill, lighter at the top and darker at the bottom
+-- (amount 0..1 added to / taken from each channel), on whatever color the bar has. The fill
+-- is set to white and the gradient carries the color, so it needs a color we can read:
+-- a hidden one (secret) keeps the bar flat.
+
 local colorHooked = setmetatable({}, { __mode = "k" })
 local blizzardColor = setmetatable({}, { __mode = "k" }) -- bar -> { r, g, b, a } Blizzard set
 local wantedColor = setmetatable({}, { __mode = "k" }) -- bar -> our color
+local wantedShade = setmetatable({}, { __mode = "k" }) -- bar -> shading amount (0 = flat)
+local shaded = setmetatable({}, { __mode = "k" }) -- bar -> true while a gradient is on it
 local applying = false
+
+local function Clamp(value)
+	return math.max(0, math.min(1, value))
+end
+
+local function Readable(r, g, b, a)
+	for _, v in ipairs({ r, g, b }) do
+		if CMP.IsSecret(v) or type(v) ~= "number" then
+			return false
+		end
+	end
+	return not CMP.IsSecret(a)
+end
+
+local function SetGradient(texture, bottom, top)
+	if texture and texture.SetGradient and CreateColor then
+		pcall(texture.SetGradient, texture, "VERTICAL", CreateColor(unpack(bottom)), CreateColor(unpack(top)))
+	end
+end
 
 local function SetColor(bar, r, g, b, a)
 	applying = true
-	pcall(bar.SetStatusBarColor, bar, r, g, b, a)
+	local shade = wantedShade[bar] or 0
+	local texture = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+	if shade > 0 and Readable(r, g, b, a) then
+		a = type(a) == "number" and a or 1
+		pcall(bar.SetStatusBarColor, bar, 1, 1, 1, a)
+		SetGradient(texture,
+			{ Clamp(r - shade), Clamp(g - shade), Clamp(b - shade), a },
+			{ Clamp(r + shade), Clamp(g + shade), Clamp(b + shade), a })
+		shaded[bar] = true
+	else
+		if shaded[bar] then
+			SetGradient(texture, { 1, 1, 1, 1 }, { 1, 1, 1, 1 })
+			shaded[bar] = nil
+		end
+		pcall(bar.SetStatusBarColor, bar, r, g, b, a)
+	end
 	applying = false
 end
 
@@ -248,20 +289,25 @@ local function HookColor(bar)
 		local c = wantedColor[self]
 		if c then
 			SetColor(self, c.r, c.g, c.b, c.a or 1)
+		elseif wantedShade[self] then
+			SetColor(self, r2, g2, b2, a2) -- Blizzard's color, shaded
 		end
 	end)
 end
 
--- color: { r, g, b, a } or nil for Blizzard's.
-function Media:SetBarColor(bar, color)
+-- color: { r, g, b, a } or nil for Blizzard's. shade: 0..1 (nil/0 = flat).
+function Media:SetBarColor(bar, color, shade)
 	if not bar then
 		return
 	end
 	HookColor(bar)
+	local oldShade = wantedShade[bar] or 0
+	wantedShade[bar] = shade and shade > 0 and shade or nil
+	local changedShade = oldShade ~= (wantedShade[bar] or 0)
 	if color then
 		wantedColor[bar] = color
 		SetColor(bar, color.r, color.g, color.b, color.a or 1)
-	elseif wantedColor[bar] then
+	elseif wantedColor[bar] or changedShade or wantedShade[bar] then
 		wantedColor[bar] = nil
 		local c = blizzardColor[bar]
 		if c then
@@ -343,23 +389,49 @@ function Media:StylePRD(info)
 	local font, outline, size = CMP:Get(key, "font"), CMP:Get(key, "outline"), CMP:Get(key, "textSize")
 	local token = self:PowerToken()
 	local healthBar = frame.healthbar or (frame.HealthBarsContainer and frame.HealthBarsContainer.healthBar)
+	local healthShade = (CMP:Get(key, "healthShading") or 0) / 100
+	local powerShade = (CMP:Get(key, "powerShading") or 0) / 100
 	local bars = {
-		{ healthBar, self:HealthTexture(key), self:HealthColor(key) },
-		{ frame.PowerBar, self:PowerTexture(key), self:PowerColor(key, token) },
-		{ frame.AlternatePowerBar, self:PowerTexture(key), nil },
+		{ healthBar, self:HealthTexture(key), self:HealthColor(key), healthShade },
+		{ frame.PowerBar, self:PowerTexture(key), self:PowerColor(key, token), powerShade },
+		{ frame.AlternatePowerBar, self:PowerTexture(key), nil, powerShade },
 	}
 	for _, entry in ipairs(bars) do
-		local bar, texture, color = entry[1], entry[2], entry[3]
+		local bar, texture, color, shade = entry[1], entry[2], entry[3], entry[4]
 		if bar then
-			-- a custom color needs gray art to color cleanly, whatever the texture
-			self:StyleBar(bar, texture, color and "always" or true)
-			self:SetBarColor(bar, color)
+			-- a custom color or shading needs gray art to color cleanly, whatever the texture
+			self:StyleBar(bar, texture, (color or shade > 0) and "always" or true)
+			self:SetBarColor(bar, color, shade)
 			self:StyleFont(bar.TextString, font, outline, size)
 			self:StyleFont(bar.LeftText, font, outline, size)
 			self:StyleFont(bar.RightText, font, outline, size)
 		end
 	end
 	self:StyleCostPreview(info)
+	self:StyleFeedback(info)
+end
+
+-- Blizzard's power bar effects: a flash on the part just spent or gained (FeedbackFrame;
+-- it animates its textures' alpha, never its own) and a glow when the bar is full
+-- (FullPowerFrame; it fades its own alpha, so the parts inside are hidden instead).
+function Media:StyleFeedback(info)
+	local bar = info.frame and info.frame.PowerBar
+	if not bar then
+		return
+	end
+	local feedback = bar.FeedbackFrame
+	if feedback and feedback.SetAlpha then
+		feedback:SetAlpha(CMP:Get(info.key, "spendFlash") and 1 or 0)
+	end
+	local full = bar.FullPowerFrame
+	if full then
+		local alpha = CMP:Get(info.key, "fullGlow") and 1 or 0
+		for _, part in ipairs({ full.SpikeFrame, full.PulseFrame }) do
+			if part.SetAlpha then
+				part:SetAlpha(alpha)
+			end
+		end
+	end
 end
 
 ---------------------------------------------------------------------------

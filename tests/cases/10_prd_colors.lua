@@ -154,3 +154,113 @@ T.test("settings: the panel keeps one width whichever section is open", function
 	local extension = CMP.LEM.internal.extension
 	T.truthy((extension.minimumWidth or 0) >= 343 + 40, "at least as wide as a slider row")
 end)
+
+-- gap between the bottom of the health bar and the top of the power bar, in UI units
+local function barGap(prd)
+	local health, power = prd.HealthBarsContainer, prd.PowerBar
+	local _, hb = health:GetRect()
+	local _, pb, _, ph = power:GetRect()
+	return hb - (pb + ph)
+end
+
+T.test("prd spacing: Square style uses exactly Edit Mode's Padding, without Blizzard's hidden 4", function(H, T)
+	local CMP = H.CMP
+	local prd = H.viewers.PRD
+	T.near(barGap(prd), 4, 0.001, "Blizzard: Padding 0 + 4 under its frame art")
+	CMP:Set("PRD", "style", "square")
+	T.near(barGap(prd), 0, 0.001, "square: the bars touch")
+	T.near(prd:GetHeight(), 24, 0.001, "frame height follows")
+	prd:SetBarPadding(2) -- Edit Mode's Padding slider
+	T.near(barGap(prd), 2, 0.001, "Padding 2")
+	prd:SetBarPadding(0)
+	CMP:Set("PRD", "sharedBorders", true)
+	CMP:Set("PRD", "borderSize", 1)
+	T.near(barGap(prd), -CMP.PixelUnit(prd), 0.001, "shared borders: overlap by the border")
+	CMP:Set("PRD", "style", "blizzard")
+	T.near(barGap(prd), 4, 0.001, "Blizzard's spacing back")
+	T.near(prd:GetHeight(), 28, 0.001)
+	prd:SetBarPadding(3)
+	T.near(barGap(prd), 7, 0.001, "Blizzard's layout is left alone again")
+end)
+
+T.test("prd effects: the spend flash and the full power glow can be hidden", function(H, T)
+	local CMP = H.CMP
+	local power = H.viewers.PRD.PowerBar
+	T.eq(power.FeedbackFrame:GetAlpha(), 1)
+	CMP:Set("PRD", "spendFlash", false)
+	T.eq(power.FeedbackFrame:GetAlpha(), 0, "no spend flash")
+	CMP:Set("PRD", "fullGlow", false)
+	T.eq(power.FullPowerFrame.SpikeFrame:GetAlpha(), 0)
+	T.eq(power.FullPowerFrame.PulseFrame:GetAlpha(), 0)
+	T.eq(power.FullPowerFrame:GetAlpha(), 1, "Blizzard's own fade untouched")
+	CMP:Set("PRD", "spendFlash", true)
+	CMP:Set("PRD", "fullGlow", true)
+	T.eq(power.FeedbackFrame:GetAlpha(), 1)
+	T.eq(power.FullPowerFrame.PulseFrame:GetAlpha(), 1)
+end)
+
+T.test("prd shading: a vertical gradient on the bar's color, kept over Blizzard's recoloring", function(H, T)
+	local CMP = H.CMP
+	local health, power = bars(H)
+	power:SetStatusBarColor(0, 0, 1, 1)
+	CMP:Set("PRD", "powerColors", { MANA = { r = 0.02, g = 0.48, b = 1, a = 1 } })
+	CMP:Set("PRD", "powerShading", 10)
+	local fill = power:GetStatusBarTexture()
+	local r, g, b = power:GetStatusBarColor()
+	T.eq(r + g + b, 3, "fill is white: the gradient carries the color")
+	local gradient = H.state(fill).gradient
+	T.eq(gradient.orientation, "VERTICAL")
+	T.near(gradient.max.g, 0.58, 0.001, "lighter at the top")
+	T.near(gradient.min.g, 0.38, 0.001, "darker at the bottom")
+	T.eq(gradient.min.r, 0, "clamped at 0")
+	T.eq(gradient.max.b, 1, "clamped at 1")
+	power:SetStatusBarColor(0, 0, 1, 1) -- Blizzard updates the bar again
+	T.near(H.state(fill).gradient.max.g, 0.58, 0.001, "still shaded")
+	-- Blizzard's own color, shaded
+	health:SetStatusBarColor(0, 1, 0, 1)
+	CMP:Set("PRD", "healthShading", 20)
+	local hg = H.state(health:GetStatusBarTexture()).gradient
+	T.near(hg.min.g, 0.8, 0.001)
+	T.near(hg.max.r, 0.2, 0.001)
+	-- off again: flat color back
+	CMP:Set("PRD", "powerShading", 0)
+	r, g, b = power:GetStatusBarColor()
+	T.near(g, 0.48, 0.001, "flat custom color")
+	T.eq(H.state(fill).gradient.min.r, 1, "gradient reset to white")
+	CMP:Set("PRD", "healthShading", 0)
+	r, g = health:GetStatusBarColor()
+	T.eq(g, 1, "Blizzard's green back")
+end)
+
+T.test("prd shading: a hidden (secret) color stays flat", function(H, T)
+	local CMP = H.CMP
+	local health = bars(H)
+	CMP:Set("PRD", "healthShading", 10)
+	health:SetStatusBarColor(H.secret(0.5), H.secret(0.5), H.secret(0.5), 1)
+	local r = health:GetStatusBarColor()
+	T.truthy(H.G.issecretvalue(r), "Blizzard's hidden color kept as it is")
+end)
+
+T.test("prd background: each bar's Shading shades its background too, half as much (Square style)", function(H, T)
+	local CMP = H.CMP
+	local health, power = bars(H)
+	CMP:Set("PRD", "style", "square")
+	CMP:Set("PRD", "barBackground", { r = 0.10, g = 0.10, b = 0.20, a = 0.8 })
+	local function back(bar)
+		for _, region in ipairs({ bar:GetRegions() }) do
+			local layer, sub = region:GetDrawLayer()
+			if layer == "BACKGROUND" and sub == -8 then return region end
+		end
+	end
+	T.falsy(H.state(back(health)).gradient, "Shading off: a plain color")
+	CMP:Set("PRD", "healthShading", 10)
+	local g = H.state(back(health)).gradient
+	T.near(g.min.b, 0.15, 0.001, "bottom: 5% darker")
+	T.near(g.max.b, 0.25, 0.001, "top: 5% lighter")
+	T.near(g.max.a, 0.8, 0.001, "keeps the background's opacity")
+	T.falsy(H.state(back(power)).gradient, "the power bar follows its own Shading")
+	CMP:Set("PRD", "powerShading", 20)
+	T.near(H.state(back(power)).gradient.min.r, 0, 0.001, "clamped at black")
+	CMP:Set("PRD", "healthShading", 0)
+	T.truthy(H.state(back(health)).color, "plain color again")
+end)

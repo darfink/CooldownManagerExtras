@@ -226,6 +226,8 @@ local SCHEMA = {
 	attachSide = { "BELOW", "ABOVE", "LEFT", "RIGHT" },
 	attachAlign = { "START", "CENTER", "END" },
 	attachGap = { -20, 60 },
+	healthShading = { 0, 40 },
+	powerShading = { 0, 40 },
 	attachOffset = { -300, 300 },
 	pinX = { -100000, 100000 },
 	pinY = { -100000, 100000 },
@@ -235,6 +237,8 @@ local SCHEMA = {
 	borderSize = { 0, 6 },
 	borderColor = "color",
 	zoom = { 0, 25 },
+	innerShadow = { 0, 8 },
+	innerShadowStrength = { 0, 100 },
 	spacingX = { -1, 20 },
 	spacingY = { -1, 20 },
 	sharedBorders = "boolean",
@@ -265,6 +269,8 @@ local SCHEMA = {
 	costTexture = "string",
 	costColorMode = { "default", "power", "custom" },
 	costColor = "color",
+	spendFlash = "boolean",
+	fullGlow = "boolean",
 }
 
 -- { [power token] = value } with only valid tokens and values.

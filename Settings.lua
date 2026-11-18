@@ -66,6 +66,41 @@ local function Any(...)
 	end
 end
 
+-- The square look is a fixed set of settings, in this order wherever it applies (icons,
+-- Personal Resource Display bars, Tracked Bars): Border, Color, Background / Zoom, Shadow,
+-- Strength, Shared Borders; plus Shading on the bar colors. Don't add more look settings:
+-- answer "make it look like X" with values for these. Indent one level at most (labels
+-- wrap and double bars look cluttered); hide a dependent setting instead of nesting it.
+-- Inner shadow size and strength (square icons, square PRD bars).
+local function ShadowSettings(info, list, hidden)
+	table.insert(list, Bind(info, "innerShadow", {
+		kind = Type.Slider,
+		name = INDENT .. "Shadow",
+		desc = "An inner shadow: a dark edge inside the border that fades toward the middle, in screen pixels. 0 turns it off.",
+		minValue = 0,
+		maxValue = 8,
+		valueStep = 1,
+		formatter = function(value)
+			return value == 0 and (OFF or "Off") or Pixels(value)
+		end,
+		hidden = hidden,
+	}))
+	table.insert(list, Bind(info, "innerShadowStrength", {
+		kind = Type.Slider,
+		name = INDENT .. "Strength",
+		desc = "How dark the shadow is at the edge.",
+		minValue = 10,
+		maxValue = 100,
+		valueStep = 5,
+		formatter = function(value)
+			return ("%d%%"):format(value)
+		end,
+		hidden = Any(hidden, function(layoutName)
+			return (CMP:Get(info.key, "innerShadow", layoutName) or 0) <= 0
+		end),
+	}))
+end
+
 local function GeometryLocked(info)
 	return function()
 		return CMP.Layout:IsGeometryLocked(info)
@@ -97,9 +132,9 @@ local function MatchOff(info)
 	end
 end
 
-local LOCKED_NOTE = "\n\n|cffffd100Needs the frame to be moved once in Edit Mode first|r (frames in their default position are placed by Blizzard)."
-local MASQUE_NOTE = "\n\nWhen Masque skins these icons (with Masque Blizzard Bars), Masque owns their look: change it in /masque. Layout, size, fonts and per-spell borders still work."
-local SPELL_NOTE = "\n\nTip: right-click a spell in the Cooldown Settings window to give just that spell its own border."
+local LOCKED_NOTE = "\n\n|cffffd100Move the frame once in Edit Mode first.|r Blizzard places frames that are still in their default position."
+local MASQUE_NOTE = "\n\nWhen Masque skins these icons, set their look in /masque. Layout, size, fonts and per-spell borders still work here."
+local SPELL_NOTE = "\n\nTip: right-click a spell in Cooldown Settings to give only that spell its own border."
 
 -- A collapsible section. Returns a check that is true while the section is collapsed.
 -- Only one section per frame is open at a time (opening one closes the others), so the
@@ -208,7 +243,7 @@ local function GrowthSettings(info, list)
 		table.insert(list, Bind(info, "collapse", {
 			kind = Type.Checkbox,
 			name = "Close Gaps",
-			desc = "Blizzard leaves an empty slot for every tracked buff that isn't active. This closes those gaps so the active ones stay together.\n\nLeft, Center and Right always do this." .. LOCKED_NOTE,
+			desc = "Blizzard leaves an empty slot for each tracked buff that is not active. This closes the gaps.\n\nLeft, Center and Right always do this." .. LOCKED_NOTE,
 			disabled = GeometryLocked(info),
 			hidden = function(layoutName)
 				return CMP:Get(info.key, "align", layoutName) ~= "native"
@@ -222,8 +257,8 @@ local function AttachSettings(info, list)
 		kind = Type.Dropdown,
 		name = "Attach To",
 		desc = "Keep this frame attached to another one. It follows that frame when it moves, resizes or hides.\n\n"
-			.. "Easiest: in Edit Mode, drag this frame next to another one. A preview shows where it will attach; let go to attach it there. Drag it away to detach, or hold Shift while dragging to move it without attaching (Edit Mode's own Snap, if on, can still snap it).\n\n"
-			.. "Arrow keys change the gap and offset while attached.\n\nBesides the cooldown frames, any Edit Mode frame works: action bars, unit frames, the cast bar, and add-on frames that use Edit Mode." .. LOCKED_NOTE,
+			.. "Easiest: in Edit Mode, drag this frame next to another one and let go. Drag it away to detach. Hold Shift while you drag to move it without attaching.\n\n"
+			.. "Arrow keys change the gap and offset. Any Edit Mode frame works: action bars, unit frames, the cast bar, add-on frames." .. LOCKED_NOTE,
 		values = function()
 			local values = { Option("Nothing (Edit Mode)", "none") }
 			for _, other in ipairs(CMP.frameInfos) do
@@ -371,7 +406,7 @@ local function IconSettings(info, list)
 	table.insert(list, Bind(info, "iconSize", {
 		kind = Type.Slider,
 		name = "Exact Size",
-		desc = "Icon size in Edit Mode units, rounded so every icon covers whole screen pixels and rows line up exactly. Off uses Edit Mode's Icon Size.\n\nNot used while Match Width sizes the icons." .. LOCKED_NOTE,
+		desc = "Icon size, rounded so each icon covers whole screen pixels. Off uses Edit Mode's Icon Size.\n\nNot used while Match Width sets the size." .. LOCKED_NOTE,
 		disabled = Any(GeometryLocked(info), MatchedWidth(info)),
 		minValue = 0,
 		maxValue = 96,
@@ -423,10 +458,11 @@ local function IconSettings(info, list)
 		end,
 		hidden = squareHidden,
 	}))
+	ShadowSettings(info, list, squareHidden)
 	table.insert(list, Bind(info, "sharedBorders", {
 		kind = Type.Checkbox,
 		name = "Shared Borders",
-		desc = "Icons that touch share one border line instead of showing two side by side (like CSS border-collapse): they overlap by the border width.\n\nAlso between attached frames that both use Shared Borders (e.g. a row attached to a Square Personal Resource Display), with Gap 0.",
+		desc = "Icons that touch share one border line instead of two.\n\nAlso between attached frames with Gap 0, when both use Shared Borders.",
 		hidden = squareHidden,
 	}))
 	if not isBars then
@@ -462,7 +498,7 @@ PRDBarSettings = function(info, list)
 	table.insert(list, Bind(info, "style", {
 		kind = Type.Dropdown,
 		name = "Style",
-		desc = "Blizzard: the normal bar frame.\nSquare: no frame art; a plain background and a crisp border inside each bar, so the bars are exactly as wide as they look (handy next to square icons).",
+		desc = "Blizzard: the normal bar frame.\nSquare: a plain background and a crisp border, so each bar is exactly as big as it looks.\n\nWith Square, the space between the bars is exactly Edit Mode's Padding. At 0 the bars touch.",
 		values = {
 			Option("Blizzard", "blizzard"),
 			Option("Square", "square"),
@@ -483,11 +519,12 @@ PRDBarSettings = function(info, list)
 		hidden = notSquare,
 	}))
 	table.insert(list, ColorSetting(info, "borderColor", INDENT .. "Color", nil, notSquare))
-	table.insert(list, ColorSetting(info, "barBackground", INDENT .. "Background", "Color behind the empty part of each bar.", notSquare))
+	table.insert(list, ColorSetting(info, "barBackground", INDENT .. "Background", "Color behind the empty part of each bar.\n\nEach bar's Shading also shades its background, half as much.", notSquare))
+	ShadowSettings(info, list, notSquare)
 	table.insert(list, Bind(info, "sharedBorders", {
 		kind = Type.Checkbox,
 		name = "Shared Borders",
-		desc = "When a Square cooldown row with Shared Borders is attached to the bars with Gap 0, the two share one border line instead of showing two.",
+		desc = "With Edit Mode's Padding at 0, the bars share one border line instead of two.\n\nAlso with a cooldown row attached to the bars with Gap 0, when that row uses Shared Borders.",
 		hidden = notSquare,
 	}))
 end
@@ -498,7 +535,7 @@ BuffBarSettings = function(info, list)
 	table.insert(list, Bind(info, "barStyle", {
 		kind = Type.Dropdown,
 		name = "Bar Style",
-		desc = "Blizzard: the normal bar frame (a dark background with a built-in edge and shadow).\nSquare: no frame art; a plain background and a crisp border inside the bar, so it's exactly as big as it looks (handy next to a square icon).",
+		desc = "Blizzard: the normal bar frame.\nSquare: a plain background and a crisp border, so the bar is exactly as big as it looks.",
 		values = {
 			Option("Blizzard", "blizzard"),
 			Option("Square", "square"),
@@ -667,6 +704,18 @@ local function HealthBarSettings(info, list)
 		height = 320,
 		hidden = collapsed,
 	}))
+	table.insert(list, Bind(info, "healthShading", {
+		kind = Type.Slider,
+		name = "Shading",
+		desc = "A vertical gradient on the bar's color: lighter at the top, darker at the bottom, by this much. 0 keeps it flat.\n\nWith Square style, the background is shaded too, half as much. A flat texture (such as Blizzard: Flat) shows it best.",
+		minValue = 0,
+		maxValue = 40,
+		valueStep = 1,
+		formatter = function(value)
+			return value == 0 and (OFF or "Off") or ("%d%%"):format(value)
+		end,
+		hidden = collapsed,
+	}))
 end
 
 local function PowerBarSettings(info, list)
@@ -714,12 +763,24 @@ local function PowerBarSettings(info, list)
 		height = 320,
 		hidden = collapsed,
 	}))
+	table.insert(list, Bind(info, "powerShading", {
+		kind = Type.Slider,
+		name = "Shading",
+		desc = "A vertical gradient on the bar's color: lighter at the top, darker at the bottom, by this much. 0 keeps it flat.\n\nWith Square style, the background is shaded too, half as much. A flat texture (such as Blizzard: Flat) shows it best.",
+		minValue = 0,
+		maxValue = 40,
+		valueStep = 1,
+		formatter = function(value)
+			return value == 0 and (OFF or "Off") or ("%d%%"):format(value)
+		end,
+		hidden = collapsed,
+	}))
 	-- the cost of the spell being cast, shown on the power bar
 	local costTextures = MediaValues("statusbar")
 	table.insert(list, Bind(info, "costTexture", {
 		kind = Type.Dropdown,
 		name = "Cost Texture",
-		desc = "While you cast, the power bar shows the spell's cost as a separate piece. Default keeps Blizzard's texture.",
+		desc = "While you cast, the power bar shows the spell's cost. Default keeps Blizzard's texture.",
 		values = function()
 			local values = costTextures()
 			table.insert(values, 2, Option("Same as Power Bar", "power"))
@@ -731,7 +792,7 @@ local function PowerBarSettings(info, list)
 	table.insert(list, Bind(info, "costColorMode", {
 		kind = Type.Dropdown,
 		name = "Cost Color",
-		desc = "The color of the spell's cost while you cast.\nBlizzard: its own color for your power type.\nLighter Power Color: a lighter shade of the power bar's color (follows a custom color).\nCustom: your own.",
+		desc = "The color of the spell's cost while you cast.\n\nBlizzard: its color for your power type.\nLighter Power Color: a lighter shade of the power bar.\nCustom: your own color.",
 		values = {
 			Option("Blizzard", "default"),
 			Option("Lighter Power Color", "power"),
@@ -742,10 +803,22 @@ local function PowerBarSettings(info, list)
 	table.insert(list, ColorSetting(info, "costColor", INDENT .. "Custom", nil, Any(collapsed, function(layoutName)
 		return CMP:Get(info.key, "costColorMode", layoutName) ~= "custom"
 	end)))
+	table.insert(list, Bind(info, "spendFlash", {
+		kind = Type.Checkbox,
+		name = "Spend Flash",
+		desc = "When you spend or gain a large part of your power at once, Blizzard flashes that part of the bar. Off hides the flash.",
+		hidden = collapsed,
+	}))
+	table.insert(list, Bind(info, "fullGlow", {
+		kind = Type.Checkbox,
+		name = "Full Power Glow",
+		desc = "Blizzard's glow at the end of the power bar when it is full (for power types that have one, such as Rage or Energy). Off hides the glow.",
+		hidden = collapsed,
+	}))
 	table.insert(list, Bind(info, "fsr", {
 		kind = Type.Checkbox,
 		name = "Five-Second Rule",
-		desc = "After you spend mana, spirit-based mana regeneration pauses for 5 seconds. A spark runs across the mana bar during those 5 seconds, so you can see when regeneration resumes.",
+		desc = "After you spend mana, spirit-based regeneration stops for 5 seconds. A spark runs across the mana bar until it starts again.",
 		hidden = collapsed,
 	}))
 end
@@ -788,7 +861,7 @@ local function TextSettings(info, list)
 			table.insert(list, Bind(info, "debuffTimers", {
 				kind = Type.Checkbox,
 				name = "Debuff Timers",
-				desc = "Blizzard shows no timer for tracked debuffs on you (such as Weakened Soul): it only reads helpful auras. This adds the countdown.\n\nIf the game hides aura timers from addons (in some combat situations), the icon shows no timer, as without this.",
+				desc = "Shows a countdown on tracked debuffs on you, such as Weakened Soul. Blizzard shows none.\n\nWhen the game hides the timer from add-ons in combat, the icon shows no timer.",
 				hidden = collapsed,
 			}))
 		end

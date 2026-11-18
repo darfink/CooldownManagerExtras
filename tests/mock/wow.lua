@@ -901,7 +901,9 @@ function M.new(opts)
 	function Texture:SetHorizTile() end
 	function Texture:SetVertTile() end
 	function Texture:SetTextureSliceMargins() end
-	function Texture:SetGradient() end
+	function Texture:SetGradient(orientation, minColor, maxColor)
+		S[self].gradient = { orientation = orientation, min = minColor, max = maxColor }
+	end
 	function Texture:AddMaskTexture(mask)
 		local s = S[self]
 		s.masks = s.masks or {}
@@ -1363,11 +1365,17 @@ function M.new(opts)
 	}
 	-- H.spells[id].known = false: not known (custom entries hide it)
 	G.IsPlayerSpell = function(id) local s = H.spells[id] return not (s and s.known == false) end
+	G.UnitName = function(unit) return unit == "player" and "Tester" or nil end
 	-- items: H.items[id] = { name, count, texture, equippable, equipped, use }
 	H.items = {}
 	H.inventory = {} -- slot -> itemID
 	G.C_Item = {
-		GetItemSpell = function(id) local i = H.items[id] return i and i.use or nil end,
+		-- name and spell ID of the item's use effect (H.items[id].use, .useSpellID)
+		GetItemSpell = function(id)
+			local i = H.items[id]
+			if not (i and i.use) then return nil end
+			return i.use, i.useSpellID
+		end,
 		GetItemInfoInstant = function() return nil end,
 		GetItemIconByID = function(id) local i = H.items[id] return i and i.texture or 134400 end,
 		GetItemCount = function(id) local i = H.items[id] return i and i.count or 0 end,

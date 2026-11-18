@@ -392,3 +392,62 @@ T.test("panel collapse toggle hides and restores our panel", function(H, T)
 	T.falsy(Settings.collapsed)
 	T.truthy(H.extension():IsShown())
 end)
+
+local function hexPicker(H)
+	local function scripted()
+		local o = { hooks = {} }
+		function o:HookScript(name, fn) self.hooks[name] = self.hooks[name] or {} table.insert(self.hooks[name], fn) end
+		function o:Run(name, ...) for _, fn in ipairs(self.hooks[name] or {}) do fn(self, ...) end end
+		return o
+	end
+	local frame = scripted()
+	local picker = { rgb = { 1, 1, 1 } }
+	local box = scripted()
+	local okay = scripted()
+	frame.Content = { HexBox = box, ColorPicker = picker }
+	frame.Footer = { OkayButton = okay }
+	function picker:SetColorRGB(r, g, b)
+		self.rgb = { r, g, b }
+		if frame.info and frame.info.swatchFunc then frame.info.swatchFunc() end
+	end
+	function frame:GetColorRGB() return picker.rgb[1], picker.rgb[2], picker.rgb[3] end
+	function frame:GetColorAlpha() return 1 end
+	function frame:SetupColorPickerAndShow(info) self.info = info end
+	function box:GetText() return self.text end
+	function box:SetText(text) self.text = text end
+	function box:OnEnterPressed()
+		local t = self.text
+		while #t < 6 do t = t .. t end
+		self.text = t:sub(1, 6)
+		picker:SetColorRGB(_G.CreateColorFromRGBAHexString(self.text .. "ff"):GetRGB())
+	end
+	_G.ColorPickerFrame = frame
+	_G.CreateColorFromRGBAHexString = function(hex)
+		local n = function(i) return tonumber(hex:sub(i, i + 1), 16) / 255 end
+		return H.G.CreateColor(n(1), n(3), n(5), n(7))
+	end
+	return frame, box, okay
+end
+
+T.test("settings: a typed hex color applies without Enter", function(H, T)
+	local frame, box, okay = hexPicker(H)
+	local got
+	H.CMP:OpenColorPicker({ r = 1, g = 1, b = 1, swatchFunc = function() got = { frame:GetColorRGB() } end })
+	box.text = "057a"
+	box:Run("OnTextChanged", true)
+	T.falsy(got, "four digits: not yet")
+	box.text = "057aff"
+	box:Run("OnTextChanged", true)
+	T.near(got[3], 1, 0.001)
+	T.near(got[2], 0x7a / 255, 0.001, "six digits apply at once")
+	got = nil
+	box.text = "fff"
+	okay:Run("PreClick")
+	T.near(got[1], 1, 0.001, "a short value applies on Okay, like Enter")
+	-- another add-on's picker is left alone
+	got = nil
+	frame:SetupColorPickerAndShow({ swatchFunc = function() got = true end })
+	box.text = "123456"
+	box:Run("OnTextChanged", true)
+	T.falsy(got, "not ours")
+end)

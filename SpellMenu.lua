@@ -43,7 +43,7 @@ local function OpenColorPicker(spellID)
 		local a = ColorPickerFrame:GetColorAlpha()
 		CMP:SetSpellStyle(spellID, "color", { r = r, g = g, b = b, a = a })
 	end
-	ColorPickerFrame:SetupColorPickerAndShow({
+	CMP:OpenColorPicker({
 		r = start.r,
 		g = start.g,
 		b = start.b,

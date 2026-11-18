@@ -16,7 +16,7 @@ local function showTooltip(self)
 		SettingsTooltip:SetOwner(self, 'ANCHOR_NONE')
 		SettingsTooltip:SetPoint('BOTTOMRIGHT', self, 'TOPLEFT')
 		SettingsTooltip:SetText(self.setting.name, 1, 1, 1)
-		SettingsTooltip:AddLine(self.setting.desc)
+		SettingsTooltip:AddLine(self.setting.desc, nil, nil, nil, true)
 		SettingsTooltip:Show()
 	end
 end

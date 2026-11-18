@@ -215,3 +215,56 @@ T.test("skin: /cme rings reports without raising, also with secret atlases", fun
 	_G.SlashCmdList.COOLDOWNMANAGEREXTRAS("rings")
 	T.truthy(true)
 end)
+
+-- the inner shadow: 4 OVERLAY -8 gradient textures on the owner itself
+local function shadowEdges(owner, H)
+	local out = {}
+	for _, r in ipairs(regionsOf(owner, "Texture")) do
+		local layer, sub = r:GetDrawLayer()
+		if layer == "OVERLAY" and sub == -8 and H.state(r).gradient then out[#out + 1] = r end
+	end
+	return out
+end
+
+T.test("skin: inner shadow on square icons, inside the border; off and Blizzard style hide it", function(H, T)
+	local item = H.viewers.Essential:AddItem({ spellID = 100 })
+	H.CMP:Set("Essential", "style", "square")
+	T.eq(#shadowEdges(item, H), 0, "off by default")
+	H.CMP:Set("Essential", "borderSize", 2)
+	H.CMP:Set("Essential", "innerShadowStrength", 50)
+	H.CMP:Set("Essential", "innerShadow", 3)
+	local edges = shadowEdges(item, H)
+	T.eq(#edges, 4, "four edges")
+	local strongest = 0
+	for _, e in ipairs(edges) do
+		T.truthy(e:IsShown())
+		local g = H.state(e).gradient
+		strongest = math.max(strongest, g.min.a, g.max.a)
+		T.eq(math.min(g.min.a, g.max.a), 0, "fades to nothing")
+	end
+	T.near(strongest, 0.5, 0.001, "strength")
+	local top = edges[1]
+	local _, _, _, x, y = top:GetPoint(1)
+	local unit = H.CMP.PixelUnit(item)
+	T.near(y, -2 * unit, 0.0001, "starts where the 2 px border ends")
+	T.near(top:GetHeight(), 3 * unit, 0.0001, "3 px deep")
+	H.CMP:Set("Essential", "innerShadow", 0)
+	T.falsy(edges[1]:IsShown(), "0 turns it off")
+	H.CMP:Set("Essential", "innerShadow", 3)
+	H.CMP:Set("Essential", "style", "blizzard")
+	T.falsy(edges[1]:IsShown(), "Blizzard style has none")
+end)
+
+T.test("skin: inner shadow on square PRD bars", function(H, T)
+	local prd = H.viewers.PRD
+	local health = prd.HealthBarsContainer.healthBar
+	H.CMP:Set("PRD", "innerShadow", 2)
+	T.eq(#shadowEdges(health, H), 0, "Blizzard style: none")
+	H.CMP:Set("PRD", "style", "square")
+	local edges = shadowEdges(health, H)
+	T.eq(#edges, 4)
+	T.truthy(edges[1]:IsShown())
+	T.eq(#shadowEdges(prd.PowerBar, H), 4, "power bar too")
+	H.CMP:Set("PRD", "style", "blizzard")
+	T.falsy(edges[1]:IsShown(), "removed with the Square style")
+end)

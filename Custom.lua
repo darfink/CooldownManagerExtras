@@ -2,8 +2,8 @@ local _, ns = ...
 local CMP = ns.CMP
 
 -- Custom entries: spells, items and trinket slots you add yourself to Essential or Utility
--- Cooldowns, and buffs (yours or from other players) you add to Tracked Buffs. They show in the same row as Blizzard's icons, in the same look, at the place
--- you pick ("after <spell>", first or last). Added and arranged in Blizzard's Cooldown
+-- Cooldowns, and buffs your own casts start in Tracked Buffs. They show in the same row as
+-- Blizzard's icons, in the same look, at the place you pick ("after <spell>", first or last). Added and arranged in Blizzard's Cooldown
 -- Settings window (CustomSettings.lua).
 --
 -- Entry: { kind = "spell" | "item" | "slot" | "aura", id = spellID | itemID | inventorySlot,
@@ -11,10 +11,11 @@ local CMP = ns.CMP
 --          always = true (items: shown with none in your bags, e.g. a potion) }
 -- Stored per viewer like the other settings (Edit Mode layout or profile): "custom".
 --
--- Buffs ("aura", Tracked Buffs only): read from the game when it lets addons see the buff.
--- In combat it may hide buffs from addons; then a buff you start yourself (a trinket, a
--- potion, a spell) is timed from your cast, for the duration read out of combat. The
--- add-on learns which cast starts which buff by watching it happen once out of combat.
+-- Buffs ("aura", Tracked Buffs only): in combat the game hides buffs from addons, so only
+-- buffs your own spells and items start are shown: a buff with the spell ID of a spell you
+-- know or of an item's use effect, timed from your cast of it, for the duration read once
+-- out of combat. Buffs from other players and passive procs can't be timed: they never
+-- show, in or out of combat, so what shows is what keeps showing in combat.
 --
 -- Taint: our icons are our own frames, parented to the viewer but without a layoutIndex,
 -- so Blizzard's grid layout never sees them. Layout.lua places them. Cooldowns go to our
@@ -226,7 +227,8 @@ function Custom:IsAvailable(entry)
 	if entry.kind == "spell" then
 		return SpellKnown(entry.id)
 	elseif entry.kind == "aura" then
-		return true -- shown while the buff is on you (see AuraState)
+		-- (a running timer stays, e.g. after you used your last potion)
+		return self:BuffStatus(entry.id) == "ok" or self:IsTimed(entry.id) -- shown while on you (AuraState)
 	elseif entry.kind == "item" then
 		return entry.always == true or ItemCount(entry.id) > 0 or IsEquipped(entry.id)
 	elseif entry.kind == "slot" then
@@ -458,9 +460,8 @@ end
 -- Buffs
 ---------------------------------------------------------------------------
 
-local estimates = {} -- buff spellID -> { start, duration }: timed from your cast (combat)
-local lastCasts = {} -- spellID -> GetTime() of your last cast of it
-local wasOn = {} -- buff spellID -> true while we saw it on you
+local estimates = {} -- buff spellID -> { start, duration }: timed from your cast
+local castTargets = {} -- castGUID -> { target, time } of your casts (UNIT_SPELLCAST_SENT)
 
 local function Saved(name)
 	local db = CMP.db
@@ -471,8 +472,8 @@ local function Saved(name)
 	return db[name]
 end
 
--- Buffs seen on you out of combat (for the + menu): spellID -> { name, icon, duration,
--- external = from another player, seen = time() }. The newest 60 are kept.
+-- Your own buffs seen on you out of combat (for the + menu): spellID -> { name, icon,
+-- duration, harmful, seen = time() }. The newest 60 are kept.
 function Custom:SeenBuffs()
 	return Saved("seenBuffs")
 end
@@ -484,26 +485,29 @@ function Custom:RecordBuffs()
 		return
 	end
 	local seen = self:SeenBuffs()
+	local durations = Saved("buffDurations")
 	local now = time()
-	-- buffs, and debuffs you put on yourself (an item's self-stun, ...); not enemies' debuffs
+	-- buffs, and debuffs you put on yourself (an item's self-stun, ...)
 	for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
 		for index = 1, 40 do
 			local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", index, filter)
 			if not ok or aura == nil or CMP.IsSecret(aura) or type(aura) ~= "table" then
 				break
 			end
-			local id = aura.spellId
-			local own = aura.isFromPlayerOrPlayerPet
-			local harmful = filter == "HARMFUL"
-			if Plain(id) and type(id) == "number" and not (harmful and not (Plain(own) and own == true)) then
+			local id, own, duration = aura.spellId, aura.isFromPlayerOrPlayerPet, aura.duration
+			-- your own only: a buff from another player isn't started by your cast
+			if Plain(id) and type(id) == "number" and Plain(own) and own == true then
+				duration = Plain(duration) and type(duration) == "number" and duration or nil
 				seen[id] = {
 					name = Plain(aura.name) and aura.name or nil,
 					icon = Plain(aura.icon) and aura.icon or nil,
-					duration = Plain(aura.duration) and aura.duration or nil,
-					external = Plain(own) and own == false or nil,
-					harmful = harmful or nil,
+					duration = duration,
+					harmful = filter == "HARMFUL" or nil,
 					seen = now,
 				}
+				if duration and duration > 0 then
+					durations[id] = duration -- what a cast of it lasts, for combat
+				end
 			end
 		end
 	end
@@ -519,32 +523,61 @@ function Custom:RecordBuffs()
 	end
 end
 
--- Learns which of your casts starts this buff: only out of combat, only when the buff is
--- your own and has just been applied (its start time is now), from a cast just before it.
-local function LearnTrigger(id, aura, now)
-	if InCombatLockdown() then
-		return
+-- The use spells of the items you wear and carry: spellID -> true. Cached until your bags
+-- or equipment change.
+local useSpells
+local function ItemUseSpell(itemID)
+	local ok, name, spellID = Try(C_Item and C_Item.GetItemSpell, itemID)
+	if not ok or name == nil then
+		ok, name, spellID = Try(GetItemSpell, itemID)
 	end
-	local own, expiration, duration = aura.isFromPlayerOrPlayerPet, aura.expirationTime, aura.duration
-	if not (Plain(own) and own == true and Plain(expiration) and Plain(duration)) then
-		return
+	return ok and Plain(spellID) and type(spellID) == "number" and spellID or nil
+end
+
+local function UseSpells()
+	if useSpells then
+		return useSpells
 	end
-	if type(expiration) ~= "number" or type(duration) ~= "number" or duration <= 0 then
-		return
-	end
-	local applied = expiration - duration
-	if now - applied > 1 then
-		return -- already on for a while: not something we just watched start
-	end
-	local best, bestTime = nil, -math.huge
-	for castID, castTime in pairs(lastCasts) do
-		if castTime <= applied + 0.1 and castTime >= applied - 0.5 and castTime > bestTime then
-			best, bestTime = castID, castTime
+	useSpells = {}
+	for slot = 1, 19 do
+		local itemID = SlotItem(slot)
+		local spellID = itemID and ItemUseSpell(itemID)
+		if spellID then
+			useSpells[spellID] = true
 		end
 	end
-	if best then
-		Saved("buffTriggers")[id] = best
+	local container = C_Container
+	if container and container.GetContainerNumSlots and container.GetContainerItemID then
+		for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+			local okSlots, slots = pcall(container.GetContainerNumSlots, bag)
+			for bagSlot = 1, okSlots and Plain(slots) and slots or 0 do
+				local ok, itemID = pcall(container.GetContainerItemID, bag, bagSlot)
+				local spellID = ok and Plain(itemID) and type(itemID) == "number" and ItemUseSpell(itemID)
+				if spellID then
+					useSpells[spellID] = true
+				end
+			end
+		end
 	end
+	return useSpells
+end
+
+function Custom:ItemsChanged()
+	useSpells = nil
+end
+
+-- A buff carries the spell ID of the spell that put it on you. So a buff with the ID of a
+-- spell you know, or of the use effect of an item you carry, is started by your cast of
+-- it: that is all this relies on, nothing guessed from timing. (Not covered: an item that
+-- starts a buff with another ID, a random outcome or a passive proc.)
+-- "ok", "notyours" (no spell or item of yours casts it), "unlearned" (duration not seen yet).
+function Custom:BuffStatus(id)
+	if not (UseSpells()[id] or SpellKnown(id)) then
+		return "notyours"
+	elseif not Saved("buffDurations")[id] then
+		return "unlearned"
+	end
+	return "ok"
 end
 
 -- An aura on you by spell ID: ok, aura (maybe secret) or nil. The lookup by spell ID may
@@ -580,64 +613,89 @@ function Custom:AuraState(entry)
 	local id = entry.id
 	local ok, aura = FindPlayerAura(id)
 	local now = GetTime()
-	local secret = ok and CMP.IsSecret(aura)
-	if ok and not secret and type(aura) == "table" then
-		local duration = aura.duration
-		if Plain(duration) and type(duration) == "number" and duration > 0 then
-			Saved("buffDurations")[id] = duration
+	if ok and not CMP.IsSecret(aura) and type(aura) == "table" then
+		local own = aura.isFromPlayerOrPlayerPet
+		if Plain(own) and own == true then
+			-- yours and readable: also timed from its start, so it stays when combat hides it
+			local expiration, duration = aura.expirationTime, aura.duration
+			if Plain(expiration) and Plain(duration) and type(expiration) == "number"
+				and type(duration) == "number" and duration > 0 then
+				local start = expiration - duration
+				local current = estimates[id]
+				if not (current and current.start == start and current.duration == duration) then
+					estimates[id] = { start = start, duration = duration, read = true }
+					C_Timer.After(math.max(0, start + duration - now) + 0.05, function()
+						CMP.Safe(self.SyncAll, self)
+					end)
+				end
+			end
+			return { active = true, aura = aura }
 		end
-		if not wasOn[id] then
-			wasOn[id] = true
-			LearnTrigger(id, aura, now)
-		end
-		return { active = true, aura = aura }
+		-- from another player (or unknown): not shown, as it couldn't be in combat
 	end
-	local inCombat = InCombatLockdown()
-	if not inCombat then
-		-- out of combat a lookup that finds nothing means it's not on you
-		if not secret then
-			wasOn[id] = nil
-		end
-		local estimate = estimates[id]
-		if estimate and now - estimate.start > 1 then
-			estimates[id] = nil -- (kept for a moment: the buff can land just after the cast)
-		end
-		return { active = false }
-	end
-	-- in combat: hidden from addons, or gone; our timing from your cast decides
 	local estimate = estimates[id]
 	if estimate and now < estimate.start + estimate.duration then
+		if not InCombatLockdown() and (estimate.read or now - estimate.start > 1) then
+			-- out of combat the game shows your buffs: not on you, so it ended early (a cast
+			-- gets a moment for its buff to land)
+			estimates[id] = nil
+			return { active = false }
+		end
 		return { active = true, estimate = estimate }
 	end
 	estimates[id] = nil
 	return { active = false }
 end
 
--- Your cast of spellID: starts the buffs it is known to start (timed, for combat).
-function Custom:OnCast(spellID)
-	local now = GetTime()
-	lastCasts[spellID] = now
-	for castID, castTime in pairs(lastCasts) do
-		if now - castTime > 5 then
-			lastCasts[castID] = nil
-		end
-	end
-	local triggers, durations = Saved("buffTriggers"), Saved("buffDurations")
-	for _, entry in ipairs(self:Entries("BuffIcon")) do
-		local id = entry.id
-		local duration = durations[id]
-		if entry.kind == "aura" and triggers[id] == spellID and duration then
-			estimates[id] = { start = now, duration = duration }
-			-- each one hides on time, not when the longest is done
-			C_Timer.After(duration + 0.05, function()
-				CMP.Safe(self.SyncAll, self)
-			end)
-		end
-	end
+function Custom:IsTimed(id)
+	local estimate = estimates[id]
+	return estimate ~= nil and GetTime() < estimate.start + estimate.duration
 end
 
-function Custom:OnCombatEnd()
-	wipe(estimates) -- out of combat buffs are read directly again
+function Custom:OnCastSent(castGUID, target)
+	local now = GetTime()
+	for guid, sent in pairs(castTargets) do
+		if now - sent.time > 10 then
+			castTargets[guid] = nil -- a cast that never went off
+		end
+	end
+	castTargets[castGUID] = { target = target, time = now }
+end
+
+-- Whether a cast lands its buff on you: no target (self-buffs, items) or yourself. A
+-- target the game hides from addons, or someone else, doesn't count.
+local function OnYou(target)
+	if target == nil or (Plain(target) and target == "") then
+		return true
+	end
+	if not Plain(target) or type(target) ~= "string" then
+		return false
+	end
+	local ok, me = Try(UnitName, "player")
+	return ok and Plain(me) and (target:match("^[^%-]+") or target) == me
+end
+
+-- Your cast of spellID: starts its buff, when tracked (timed, for combat).
+function Custom:OnCast(spellID, castGUID)
+	local sent = Plain(castGUID) and castTargets[castGUID] or nil
+	if sent then
+		castTargets[castGUID] = nil
+	end
+	if not OnYou(sent and sent.target) then
+		return -- cast on someone else: the buff is on them, not you
+	end
+	if not self:Has("BuffIcon", "aura", spellID) or self:BuffStatus(spellID) ~= "ok" then
+		return
+	end
+	local duration = Saved("buffDurations")[spellID]
+	estimates[spellID] = { start = GetTime(), duration = duration }
+	-- out of combat: check after a moment that it landed; and hide it on time
+	C_Timer.After(1.1, function()
+		CMP.Safe(self.SyncAll, self)
+	end)
+	C_Timer.After(duration + 0.05, function()
+		CMP.Safe(self.SyncAll, self)
+	end)
 end
 
 local function UpdateAura(frame, entry)
@@ -720,8 +778,8 @@ function Custom:Sync(info)
 	local shown = {}
 	local index = 0
 	for i, entry in ipairs(self:Entries(key)) do
-		local available = self:IsAvailable(entry)
 		local auraState
+		local available = self:IsAvailable(entry)
 		if available and entry.kind == "aura" then
 			auraState = self:AuraState(entry)
 			available = auraState.active or ShowsInactive(info)
@@ -917,16 +975,24 @@ function Custom:Start()
 	end
 	pcall(self.events.RegisterUnitEvent, self.events, "UNIT_AURA", "player")
 	pcall(self.events.RegisterUnitEvent, self.events, "UNIT_SPELLCAST_SUCCEEDED", "player")
-	self.events:SetScript("OnEvent", function(_, event, _, _, spellID)
-		if event == "UNIT_SPELLCAST_SUCCEEDED" then
-			if Plain(spellID) and type(spellID) == "number" then
-				CMP.Safe(self.OnCast, self, spellID)
+	pcall(self.events.RegisterUnitEvent, self.events, "UNIT_SPELLCAST_SENT", "player")
+	self.events:SetScript("OnEvent", function(_, event, _, arg2, arg3, arg4)
+		if event == "UNIT_SPELLCAST_SENT" then
+			-- unit, target, castGUID, spellID
+			if Plain(arg3) and arg3 ~= nil then
+				CMP.Safe(self.OnCastSent, self, arg3, arg2)
 			end
+			return
+		elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+			-- unit, castGUID, spellID
+			if Plain(arg3) and type(arg3) == "number" then
+				CMP.Safe(self.OnCast, self, arg3, arg2)
+			end
+		elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
+			self:ItemsChanged()
 		end
 		if event == "UNIT_AURA" then
 			CMP.Safe(self.RecordBuffs, self)
-		elseif event == "PLAYER_REGEN_ENABLED" then
-			self:OnCombatEnd()
 		end
 		if cooldownEvents[event] then
 			CMP.Safe(self.UpdateAllCooldowns, self)

@@ -252,3 +252,93 @@ function Diagnostics:ProbeOne(kind, arg)
 		print(("  your buffs: %d listed, %d with a readable spell ID"):format(total, readable))
 	end
 end
+
+---------------------------------------------------------------------------
+-- /cme probe events: logs what the game tells addons when a buff is added to or removed
+-- from you, so we can see what is left to work with in combat (procs from gear, buffs from
+-- other players): the aura change event and lookups of your custom buffs.
+-- Runs until /cme probe events again, or 40 events.
+---------------------------------------------------------------------------
+
+local AURA_FIELDS = { "spellId", "name", "icon", "auraInstanceID", "duration", "expirationTime", "isFromPlayerOrPlayerPet" }
+local MAX_EVENTS = 40
+
+local function Kind(value)
+	if CMP.IsSecret(value) then
+		return "|cffffd100secret|r"
+	end
+	return value == nil and "nil" or type(value)
+end
+
+function Diagnostics:ReportAuraEvent(updateInfo)
+	local inCombat = InCombatLockdown() and "|cffffd100combat|r" or "no combat"
+	if CMP.IsSecret(updateInfo) or type(updateInfo) ~= "table" then
+		print(("[%s] UNIT_AURA: updateInfo %s"):format(inCombat, Kind(updateInfo)))
+		return true
+	end
+	local added, removed = updateInfo.addedAuras, updateInfo.removedAuraInstanceIDs
+	if not (added or removed or updateInfo.isFullUpdate) then
+		return false -- only refreshed values: not interesting, not counted
+	end
+	print(("[%s] UNIT_AURA: full %s | added %s | removed %s"):format(inCombat, Show(updateInfo.isFullUpdate), Kind(added), Kind(removed)))
+	if type(added) == "table" and not CMP.IsSecret(added) then
+		for _, aura in ipairs(added) do
+			print("  added: " .. Fields(aura, AURA_FIELDS))
+			local instance = not CMP.IsSecret(aura) and type(aura) == "table" and aura.auraInstanceID or nil
+			if instance ~= nil then
+				local okData, data = Call(C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID, "player", instance)
+				print("    by instance: " .. (okData and Fields(data, { "spellId", "name", "duration" }) or "error"))
+				local okDuration, duration = Call(C_UnitAuras and C_UnitAuras.GetAuraDuration, "player", instance)
+				print("    duration object: " .. (okDuration and duration ~= nil
+					and ("yes -> our cooldown widget: " .. TestWidget("SetCooldownFromDurationObject", duration, true)) or "no"))
+				local icon = not CMP.IsSecret(aura) and aura.icon
+				if icon ~= nil then
+					self.testTexture = self.testTexture or UIParent:CreateTexture()
+					print("    icon -> our texture: " .. (pcall(self.testTexture.SetTexture, self.testTexture, icon) and GOOD or BAD))
+				end
+			end
+		end
+	end
+	if type(removed) == "table" and not CMP.IsSecret(removed) then
+		for _, instance in ipairs(removed) do
+			print("  removed instance: " .. Show(instance))
+		end
+	end
+	-- can your custom buffs be found by spell ID right now?
+	for _, entry in ipairs(CMP.Custom:Entries("BuffIcon")) do
+		if entry.kind == "aura" then
+			local okLookup, aura = Call(C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID, entry.id)
+			print(("  custom %s (%d) by spell ID: %s"):format(tostring(CMP.Custom:Name(entry)), entry.id,
+				okLookup and Kind(aura) or "error"))
+		end
+	end
+	return true
+end
+
+function Diagnostics:ToggleEventProbe()
+	local frame = self.eventProbe
+	if frame and frame.on then
+		frame:UnregisterAllEvents()
+		frame.on = false
+		CMP:Print("Event probe off.")
+		return
+	end
+	if not frame then
+		frame = CreateFrame("Frame")
+		self.eventProbe = frame
+		frame:SetScript("OnEvent", function(_, event, _, updateInfo)
+			local ok, counted = CMP.Safe(self.ReportAuraEvent, self, updateInfo)
+			if ok and counted then
+				frame.count = frame.count + 1
+				if frame.count >= MAX_EVENTS then
+					self:ToggleEventProbe()
+				end
+			end
+		end)
+	end
+	frame.count = 0
+	frame.on = true
+	pcall(frame.RegisterUnitEvent, frame, "UNIT_AURA", "player")
+	-- (no combat log: registering for it is reserved for the Blizzard UI here)
+	CMP:Print("Event probe on. Gain and lose buffs in and out of combat, e.g. a gear proc on a target dummy. /cme probe events stops it.")
+end

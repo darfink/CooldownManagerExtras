@@ -16,7 +16,7 @@ local function showTooltip(self)
 		SettingsTooltip:SetOwner(self, 'ANCHOR_NONE')
 		SettingsTooltip:SetPoint('BOTTOMRIGHT', self, 'TOPLEFT')
 		SettingsTooltip:SetText(self.setting.name, 1, 1, 1)
-		SettingsTooltip:AddLine(self.setting.desc)
+		SettingsTooltip:AddLine(self.setting.desc, nil, nil, nil, true)
 		SettingsTooltip:Show()
 	end
 end
@@ -103,7 +103,11 @@ local function onSwatchClick(self)
 	-- store current/previous colors for reset capabilities
 	parent.oldValue = CreateColor(info.r, info.g, info.b, info.opacity)
 
-	ColorPickerFrame:SetupColorPickerAndShow(info)
+	if ns.CMP and ns.CMP.OpenColorPicker then
+		ns.CMP:OpenColorPicker(info)
+	else
+		ColorPickerFrame:SetupColorPickerAndShow(info)
+	end
 end
 
 lib.internal:CreatePool(lib.SettingType.ColorPicker, function()

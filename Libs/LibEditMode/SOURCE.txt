@@ -1,1 +1,4 @@
-Bundled from https://github.com/p3lim-wow/LibEditMode @ adfa353 (unmodified)
+Bundled from https://github.com/p3lim-wow/LibEditMode @ adfa353
+Local changes:
+- widgets/*.lua show setting descriptions with word wrap (AddLine ..., true).
+- widgets/colorpicker.lua opens the picker through CMP:OpenColorPicker (typed hex values apply).

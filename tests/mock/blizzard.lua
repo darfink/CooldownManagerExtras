@@ -27,7 +27,7 @@ function B.install(H)
 		if not raw then
 			local methods = getmetatable(CreateFrame("Frame")).__index
 			raw = { SetPoint = methods.SetPoint, ClearAllPoints = methods.ClearAllPoints, SetSize = methods.SetSize,
-				SetWidth = methods.SetWidth, SetScale = methods.SetScale }
+				SetWidth = methods.SetWidth, SetHeight = methods.SetHeight, SetScale = methods.SetScale }
 		end
 		return raw
 	end
@@ -429,6 +429,40 @@ function B.install(H)
 		prd.PowerBar.ManaCostPredictionBar:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
 		prd.PowerBar.ManaCostPredictionBar:SetVertexColor(0, 0.447, 1)
 		prd.AlternatePowerBar = bar(prd)
+		prd.AlternatePowerBar:Hide()
+		prd.ClassFrameContainer = CreateFrame("Frame", nil, prd)
+		prd.ClassFrameContainer:Hide()
+		-- Blizzard's power bar effects
+		prd.PowerBar.FeedbackFrame = CreateFrame("Frame", nil, prd.PowerBar)
+		prd.PowerBar.FullPowerFrame = CreateFrame("Frame", nil, prd.PowerBar)
+		prd.PowerBar.FullPowerFrame.SpikeFrame = CreateFrame("Frame", nil, prd.PowerBar.FullPowerFrame)
+		prd.PowerBar.FullPowerFrame.PulseFrame = CreateFrame("Frame", nil, prd.PowerBar.FullPowerFrame)
+		-- Blizzard's bar stacking (PersonalResourceDisplayMixin): Edit Mode Padding + 4
+		H.raw.SetSize(prd.HealthBarsContainer, 200, 12)
+		H.raw.SetPoint(prd.HealthBarsContainer, "TOP", prd, "TOP", 0, 0)
+		H.raw.SetPoint(prd.HealthBarsContainer.healthBar, "TOPLEFT", prd.HealthBarsContainer, "TOPLEFT", 0, 0)
+		H.raw.SetPoint(prd.HealthBarsContainer.healthBar, "BOTTOMRIGHT", prd.HealthBarsContainer, "BOTTOMRIGHT", 0, 0)
+		prd.barPadding = 0
+		function prd:GetMinimumFrameHeight() return 15 end
+		function prd:GetBarPadding() return (self.barPadding or 0) + 4 end
+		function prd:HasClassInfo() return false end
+		function prd:UpdateFrameHeight()
+			H.raw.SetHeight(self, self.HealthBarsContainer:GetHeight() + self:GetBarPadding() + self.PowerBar:GetHeight())
+		end
+		function prd:UpdatePowerBarAnchor()
+			self.PowerBar:ClearAllPoints()
+			self.PowerBar:SetPoint("TOP", self.HealthBarsContainer, "BOTTOM", 0, -self:GetBarPadding())
+		end
+		function prd:UpdateAdditionalBarAnchors()
+			self:UpdateFrameHeight()
+		end
+		function prd:SetBarPadding(padding)
+			self.barPadding = padding
+			self:UpdatePowerBarAnchor()
+			self:UpdateAdditionalBarAnchors()
+		end
+		prd:UpdatePowerBarAnchor()
+		prd:UpdateFrameHeight()
 		H.viewers.PRD = prd
 		return prd
 	end

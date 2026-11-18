@@ -100,9 +100,25 @@ function CustomSettings:AddSpell(key, spellID)
 	ReportAdd(Custom:Add(key, entry), entry)
 end
 
+-- Why a buff can't show (nil when it can).
+function CustomSettings:BuffProblem(spellID)
+	local status = Custom:BuffStatus(spellID)
+	if status == "notyours" then
+		return "Not started by a spell you know or an item you carry, so it can't be shown: in combat the game hides buffs, and only a buff you cast yourself can be timed. (Buffs from other players, passive procs and random effects can't.)"
+	elseif status == "unlearned" then
+		return "Duration not known yet: cast it once out of combat."
+	end
+	return nil
+end
+
 function CustomSettings:AddAura(key, spellID)
 	local entry = { kind = "aura", id = spellID }
-	ReportAdd(Custom:Add(key, entry), entry)
+	local added = Custom:Add(key, entry)
+	ReportAdd(added, entry)
+	local problem = added and self:BuffProblem(spellID)
+	if problem then
+		CMP:Print(problem)
+	end
 end
 
 function CustomSettings:AddItem(key, itemID)
@@ -350,38 +366,6 @@ local function SpellTooltip(button, spellID)
 	end
 end
 
--- Your buffs and debuffs right now (when the game lets addons read them):
--- { id, name, icon, external, duration, harmful }. Debuffs too: an item can put one on you
--- as part of its effect (Transformative Cocoon's self-stun).
-local function CurrentBuffs()
-	local result = {}
-	if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then
-		return result
-	end
-	for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
-		for index = 1, 40 do
-			local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", index, filter)
-			if not ok or aura == nil or CMP.IsSecret(aura) or type(aura) ~= "table" then
-				break
-			end
-			local id, name, icon, own = aura.spellId, aura.name, aura.icon, aura.isFromPlayerOrPlayerPet
-			local duration = aura.duration
-			if not CMP.IsSecret(id) and type(id) == "number" then
-				table.insert(result, {
-					id = id,
-					name = not CMP.IsSecret(name) and name or tostring(id),
-					icon = not CMP.IsSecret(icon) and icon or nil,
-					external = not CMP.IsSecret(own) and own == false,
-					duration = not CMP.IsSecret(duration) and duration or nil,
-					harmful = filter == "HARMFUL",
-				})
-			end
-		end
-	end
-	table.sort(result, function(a, b) return a.name < b.name end)
-	return result
-end
-
 -- "12 s", "2 min", or "no timer" (auras without a duration)
 local function FormatDuration(seconds)
 	if type(seconds) ~= "number" or seconds <= 0 then
@@ -396,7 +380,8 @@ end
 CustomSettings.FormatDuration = FormatDuration
 
 -- Several buffs can share a name (an item can put two on you, e.g. the effect and a
--- second stage): the label shows each one's duration and spell ID to tell them apart.
+-- second stage): the label shows each one's duration and spell ID to tell them apart, and
+-- the spell or item that starts it.
 function CustomSettings:AddBuffButton(parent, key, buff)
 	local label = IconMarkup(buff.icon or Custom:Texture({ kind = "aura", id = buff.id })) .. buff.name
 		.. (buff.harmful and " |cffff6060debuff|r" or "")
@@ -408,38 +393,32 @@ function CustomSettings:AddBuffButton(parent, key, buff)
 	SpellTooltip(button, buff.id)
 end
 
+-- Only buffs your own casts start: the ones that can be timed in combat.
 function CustomSettings:OpenBuffMenu(tile, key)
 	MenuUtil.CreateContextMenu(tile, function(_, root)
 		root:CreateTitle("Add to " .. CMP:GetName(key))
-		root:CreateButton("Buff by Spell ID or Name...", function() self:Prompt(key, "aura") end)
-		local now = root:CreateButton("On You Now (Buffs and Debuffs)")
-		local current = CurrentBuffs()
-		for _, buff in ipairs(current) do
-			self:AddBuffButton(now, key, buff)
-		end
-		if #current == 0 then
-			now:CreateButton("Nothing readable right now"):SetEnabled(false)
-		end
-		-- buffs seen on you out of combat, newest first, split by who gave them
-		local seenList = {}
+		local list = {}
 		for id, info in pairs(Custom:SeenBuffs()) do
-			table.insert(seenList, { id = id, name = info.name or tostring(id), icon = info.icon, external = info.external,
-				duration = info.duration, harmful = info.harmful, seen = info.seen or 0 })
-		end
-		table.sort(seenList, function(a, b) return a.seen > b.seen end)
-		local fromOthers = root:CreateButton("Seen on You: From Others")
-		local yours = root:CreateButton("Seen on You: Your Own")
-		local counts = { [fromOthers] = 0, [yours] = 0 }
-		for _, buff in ipairs(seenList) do
-			local parent = buff.external and fromOthers or yours
-			counts[parent] = counts[parent] + 1
-			self:AddBuffButton(parent, key, buff)
-		end
-		for parent, count in pairs(counts) do
-			if count == 0 then
-				parent:CreateButton("None seen yet (out of combat)"):SetEnabled(false)
+			if Custom:BuffStatus(id) == "ok" then
+				table.insert(list, { id = id, name = info.name or tostring(id), icon = info.icon,
+					duration = info.duration, harmful = info.harmful, seen = info.seen or 0 })
 			end
 		end
+		table.sort(list, function(a, b) return a.seen > b.seen end)
+		local started = root:CreateButton("Started by Your Spells and Items")
+		if started.SetTooltip then
+			started:SetTooltip(function(tooltip)
+				tooltip:SetText("Started by Your Spells and Items", 1, 1, 1)
+				tooltip:AddLine("Buffs you have started yourself, out of combat. In combat the game hides buffs from add-ons, so these are timed from your cast.\n\nNot listed: buffs from other players and passive procs. They can't be shown in combat.", nil, nil, nil, true)
+			end)
+		end
+		for _, buff in ipairs(list) do
+			self:AddBuffButton(started, key, buff)
+		end
+		if #list == 0 then
+			started:CreateButton("None yet: use a trinket, potion or spell once out of combat"):SetEnabled(false)
+		end
+		root:CreateButton("Buff by Spell ID or Name...", function() self:Prompt(key, "aura") end)
 		root:CreateDivider()
 		root:CreateTitle("Or drop a spell or item on the + tile")
 	end)
@@ -611,7 +590,7 @@ local function ShowTooltip(tile)
 	if tile.isAdd then
 		if tile.key == "BuffIcon" then
 			tooltip:SetText("Add Custom Buff", 1, 1, 1)
-			tooltip:AddLine("Yours or from other players. Click for a menu, or drop a spell or item here.", nil, nil, nil, true)
+			tooltip:AddLine("A buff your own spell or item starts (trinkets, potions, spells). Click for a menu, or drop a spell or item here.", nil, nil, nil, true)
 		else
 			tooltip:SetText("Add Custom Spell or Item", 1, 1, 1)
 			tooltip:AddLine("Click for a menu, or drop a spell or item here.", nil, nil, nil, true)
@@ -628,6 +607,10 @@ local function ShowTooltip(tile)
 		end
 		if not shown or tooltip:NumLines() == 0 then
 			tooltip:SetText(Custom:Name(entry), 1, 1, 1)
+		end
+		local problem = entry.kind == "aura" and CustomSettings:BuffProblem(entry.id)
+		if problem then
+			tooltip:AddLine(problem, 1, 0.38, 0.38, true)
 		end
 		tooltip:AddLine("Custom (Cooldown Manager Extras). Right-click for options.", 0.31, 0.64, 1, true)
 	end

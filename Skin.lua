@@ -1,5 +1,6 @@
 local _, ns = ...
 local CMP = ns.CMP
+local raw = CMP.raw
 
 -- Icon styling for Essential, Utility, Tracked Buffs and the icons of Tracked Bars.
 --  * "blizzard": the native look. A spell with its own border color gets a pixel border.
@@ -296,6 +297,62 @@ local function LayoutBorder(border, pixels, color, inset)
 	border:Show()
 end
 
+-- Inner shadow: four dark edges inside the border that fade out toward the middle, drawn
+-- on the owner itself (OVERLAY -8): above the icon or bar fill, below text and swipes.
+-- inset: the border's width in pixels, so the shadow starts where the border ends.
+local function LayoutShadow(owner, state, pixels, strength, inset)
+	if not pixels or pixels <= 0 or not strength or strength <= 0 or not CreateColor then
+		if state.shadow then
+			for _, edge in ipairs(state.shadow) do
+				edge:Hide()
+			end
+		end
+		return
+	end
+	if not state.shadow then
+		state.shadow = {}
+		for i = 1, 4 do
+			local edge = owner:CreateTexture(nil, "OVERLAY", nil, -8)
+			edge:SetTexture(WHITE)
+			edge:SetTexelSnappingBias(0)
+			edge:SetSnapToPixelGrid(false)
+			state.shadow[i] = edge
+		end
+	end
+	local unit = CMP.PixelUnit(owner)
+	local t = pixels * unit
+	local i = (inset or 0) * unit
+	local dark, clear = CreateColor(0, 0, 0, strength), CreateColor(0, 0, 0, 0)
+	local top, bottom, left, right = unpack(state.shadow)
+	top:ClearAllPoints()
+	top:SetPoint("TOPLEFT", i, -i)
+	top:SetPoint("TOPRIGHT", -i, -i)
+	top:SetHeight(t)
+	top:SetGradient("VERTICAL", clear, dark)
+	bottom:ClearAllPoints()
+	bottom:SetPoint("BOTTOMLEFT", i, i)
+	bottom:SetPoint("BOTTOMRIGHT", -i, i)
+	bottom:SetHeight(t)
+	bottom:SetGradient("VERTICAL", dark, clear)
+	left:ClearAllPoints()
+	left:SetPoint("TOPLEFT", i, -i)
+	left:SetPoint("BOTTOMLEFT", i, i)
+	left:SetWidth(t)
+	left:SetGradient("HORIZONTAL", dark, clear)
+	right:ClearAllPoints()
+	right:SetPoint("TOPRIGHT", -i, -i)
+	right:SetPoint("BOTTOMRIGHT", -i, i)
+	right:SetWidth(t)
+	right:SetGradient("HORIZONTAL", clear, dark)
+	for _, edge in ipairs(state.shadow) do
+		edge:Show()
+	end
+end
+
+local function ShadowOf(key)
+	return CMP:Get(key, "innerShadow"), (CMP:Get(key, "innerShadowStrength") or 0) / 100
+end
+
 function Skin:ApplyItem(info, item)
 	if info.kind ~= "icons" and info.kind ~= "bars" then
 		return
@@ -318,6 +375,7 @@ function Skin:ApplyItem(info, item)
 		-- drawn on our own frame above the icon.
 		state.square = false
 		SetRingHidden(item, state, false)
+		LayoutShadow(target, state, 0)
 		if spellStyle and spellStyle.color then
 			LayoutBorder(EnsureBorder(target, state), spellStyle.size or 2, spellStyle.color)
 		elseif state.border then
@@ -364,9 +422,12 @@ function Skin:ApplyItem(info, item)
 		end
 		color = color or CMP:Get(key, "borderColor")
 		LayoutBorder(EnsureBorder(target, state), size, color)
+		local shadow, strength = ShadowOf(key)
+		LayoutShadow(target, state, shadow, strength, size)
 	else
 		state.square = false
 		SetRingHidden(item, state, false)
+		LayoutShadow(target, state, 0)
 		if state.mask and not state.masked then
 			icon:AddMaskTexture(state.mask)
 			state.masked = true
@@ -476,7 +537,9 @@ local function BarState(bar)
 end
 
 -- Square look on one bar (Personal Resource Display or Tracked Bars), or Blizzard's back.
-local function StyleBar(bar, square, background, borderSize, borderColor)
+-- shade: the bar's Shading (0..1). The background gets half of it as a vertical gradient.
+-- shadow, strength: inner shadow in pixels and its opacity (0..1), or nil.
+local function StyleBar(bar, square, background, borderSize, borderColor, shade, shadow, strength)
 	local state = BarState(bar)
 	if square then
 		if state.art then
@@ -486,9 +549,28 @@ local function StyleBar(bar, square, background, borderSize, borderColor)
 			state.back = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
 			state.back:SetAllPoints(bar)
 		end
-		state.back:SetColorTexture(background.r, background.g, background.b, background.a or 1)
+		if shade and shade > 0 and state.back.SetGradient and CreateColor then
+			local d, a = shade / 2, background.a or 1
+			local function Clamp(v)
+				return math.max(0, math.min(1, v))
+			end
+			state.back:SetTexture(WHITE)
+			state.back:SetVertexColor(1, 1, 1, 1)
+			state.back:SetGradient("VERTICAL",
+				CreateColor(Clamp(background.r - d), Clamp(background.g - d), Clamp(background.b - d), a),
+				CreateColor(Clamp(background.r + d), Clamp(background.g + d), Clamp(background.b + d), a))
+			state.gradient = true
+		else
+			if state.gradient and state.back.SetGradient and CreateColor then
+				local white = CreateColor(1, 1, 1, 1)
+				state.back:SetGradient("VERTICAL", white, white)
+				state.gradient = nil
+			end
+			state.back:SetColorTexture(background.r, background.g, background.b, background.a or 1)
+		end
 		state.back:Show()
 		LayoutBorder(EnsureBorder(bar, state), borderSize, borderColor)
+		LayoutShadow(bar, state, shadow, strength, borderSize)
 		state.styled = true
 	elseif state.styled then
 		if state.art then
@@ -500,7 +582,152 @@ local function StyleBar(bar, square, background, borderSize, borderColor)
 		if state.border then
 			state.border:Hide()
 		end
+		LayoutShadow(bar, state, 0)
 		state.styled = false
+	end
+end
+
+---------------------------------------------------------------------------
+-- Space between the Personal Resource Display's bars. Blizzard puts its Edit Mode
+-- Padding plus 4 hidden units between them; its frame art reaches into those 4 units, so
+-- they never show. Square style hides that art, so it uses exactly the Padding instead
+-- (whole pixels; 0 = the bars touch, or share one border line with Shared Borders).
+-- This repeats Blizzard's UpdatePowerBarAnchor / UpdateAdditionalBarAnchors /
+-- UpdateFrameHeight with that padding, after each of them runs.
+---------------------------------------------------------------------------
+
+local prdLayout = setmetatable({}, { __mode = "k" }) -- frame -> { hooked, square, busy, applying }
+
+local function Shown(region)
+	local shown = region and region.IsShown and region:IsShown()
+	return not CMP.IsSecret(shown) and shown == true
+end
+
+local function Number(value)
+	return type(value) == "number" and not CMP.IsSecret(value) and value or 0
+end
+
+function Skin:SquarePRDPadding(info, frame)
+	local unit = CMP.PixelUnit(frame)
+	local padding = CMP.Snap(Number(frame.barPadding), frame)
+	if padding <= 0 and CMP:Get(info.key, "sharedBorders") then
+		return -CMP:Get(info.key, "borderSize") * unit
+	end
+	return padding
+end
+
+local function LayoutPRDBars(frame, padding)
+	local health, power, alt, class = frame.HealthBarsContainer, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer
+	if not (health and power and alt and class) then
+		return true
+	end
+	-- protected in combat: after combat (CanTouch flags the retry)
+	for _, region in ipairs({ frame, power, alt, class }) do
+		if not CMP:CanTouch(region) then
+			return false
+		end
+	end
+	-- a secret size can't be measured: keep Blizzard's layout until it can
+	for _, region in ipairs({ health, power, alt, class }) do
+		if CMP.IsSecret(region:GetHeight()) then
+			return false
+		end
+	end
+	local hideHealth, hidePower = frame.hideHealth == true, frame.hidePower == true
+	local altShown, classShown = Shown(alt), Shown(class)
+	local classOffset = Number(class.yOffset)
+	if not hideHealth then
+		raw.ClearAllPoints(power)
+		raw.SetPoint(power, "TOP", health, "BOTTOM", 0, -padding)
+	end
+	if altShown then
+		raw.ClearAllPoints(alt)
+		if not hidePower then
+			raw.SetPoint(alt, "TOP", power, "BOTTOM", 0, -padding)
+		elseif not hideHealth then
+			raw.SetPoint(alt, "TOP", health, "BOTTOM", 0, -padding)
+		else
+			raw.SetPoint(alt, "TOP", frame, "TOP", 0, 0)
+		end
+	end
+	local above = altShown and alt or (not hidePower and power) or (not hideHealth and health) or nil
+	if classShown then
+		raw.ClearAllPoints(class)
+		if above then
+			raw.SetPoint(class, "TOP", above, "BOTTOM", 0, classOffset - padding)
+		else
+			raw.SetPoint(class, "TOP", frame, "TOP", 0, classOffset)
+		end
+	end
+	-- Blizzard's UpdateFrameHeight with this padding
+	local height = 0
+	if not hideHealth then
+		height = height + Number(health:GetHeight())
+	end
+	if not hidePower then
+		if not hideHealth then
+			height = height + padding
+		end
+		height = height + Number(power:GetHeight())
+	end
+	if altShown then
+		if not hidePower or not hideHealth then
+			height = height + padding
+		end
+		height = height + Number(alt:GetHeight())
+	end
+	local hasClass = frame.HasClassInfo and frame:HasClassInfo()
+	if classShown and not CMP.IsSecret(hasClass) and hasClass then
+		if not hidePower or not hideHealth or altShown then
+			height = height + padding
+		end
+		height = height - classOffset + Number(class:GetHeight())
+	end
+	local minimum = frame.GetMinimumFrameHeight and Number(frame:GetMinimumFrameHeight()) or 15
+	raw.SetHeight(frame, math.max(height, minimum))
+	return true
+end
+
+function Skin:LayoutPRD(info)
+	local frame = info.frame
+	if not frame or not frame.GetBarPadding then
+		return
+	end
+	local state = prdLayout[frame]
+	if not state then
+		state = {}
+		prdLayout[frame] = state
+	end
+	if not state.hooked then
+		state.hooked = true
+		local function Again()
+			CMP.Safe(self.LayoutPRD, self, info)
+		end
+		for _, method in ipairs({ "UpdatePowerBarAnchor", "UpdateAdditionalBarAnchors", "UpdateFrameHeight" }) do
+			CMP.HookMethod(frame, method, Again)
+		end
+	end
+	if state.busy then
+		return
+	end
+	local square = CMP:Get(info.key, "style") == "square"
+	if not square and not state.square then
+		return -- Blizzard's own layout, untouched
+	end
+	-- Square: our padding. Back to Blizzard: one pass with its padding, then hands off.
+	local padding = square and self:SquarePRDPadding(info, frame) or Number(frame:GetBarPadding())
+	state.busy = true
+	local ok, done = CMP.Safe(LayoutPRDBars, frame, padding)
+	state.busy = false
+	if not (ok and done) then
+		return -- not now (combat or secret sizes); a later update tries again
+	end
+	state.square = square or nil
+	-- Blizzard's hooks may have re-attached frames to its own spacing first: redo them on ours.
+	if CMP.Anchors and not state.applying then
+		state.applying = true
+		CMP.Safe(CMP.Anchors.ApplyAll, CMP.Anchors)
+		state.applying = false
 	end
 end
 
@@ -511,9 +738,13 @@ function Skin:StylePRD(info)
 	end
 	local key = info.key
 	local square = CMP:Get(key, "style") == "square"
+	local shadow, strength = ShadowOf(key)
+	local health = frame.HealthBarsContainer and frame.HealthBarsContainer.healthBar
 	for _, bar in ipairs(PRDBars(frame)) do
-		StyleBar(bar, square, CMP:Get(key, "barBackground"), CMP:Get(key, "borderSize"), CMP:Get(key, "borderColor"))
+		local shade = (CMP:Get(key, bar == health and "healthShading" or "powerShading") or 0) / 100
+		StyleBar(bar, square, CMP:Get(key, "barBackground"), CMP:Get(key, "borderSize"), CMP:Get(key, "borderColor"), shade, shadow, strength)
 	end
+	self:LayoutPRD(info)
 end
 
 -- Tracked Bars: the bar next to each icon. Same look as the Personal Resource Display's.

@@ -24,6 +24,7 @@ CMP.raw = {
 	ClearAllPoints = FrameMethods.ClearAllPoints,
 	SetSize = FrameMethods.SetSize,
 	SetWidth = FrameMethods.SetWidth,
+	SetHeight = FrameMethods.SetHeight,
 	SetScale = FrameMethods.SetScale,
 }
 
@@ -105,6 +106,8 @@ CMP.defaults = {
 	borderSize = 1, -- physical pixels
 	borderColor = { r = 0, g = 0, b = 0, a = 1 },
 	zoom = 8, -- percent cropped from each icon edge (square style)
+	innerShadow = 0, -- square icons / square PRD bars: shadow inside the border, in pixels (0 = off)
+	innerShadowStrength = 60, -- percent opacity at the edge
 	spacingX = -1, -- icons: pixels between icons in a row; -1 = Blizzard's Icon Padding
 	spacingY = -1, -- icons: pixels between rows; -1 = same as spacingX
 	sharedBorders = false, -- square icons / square PRD bars: neighbours share one border line
@@ -129,10 +132,14 @@ CMP.defaults = {
 	healthTexture = "default",
 	powerColors = false, -- { [power token] = color }: custom color per power type
 	powerTexture = "default",
+	healthShading = 0, -- percent: a vertical gradient over the health fill (0 = flat)
+	powerShading = 0, -- the same for the power bars
 	-- the cost of the spell you're casting, shown on the power bar
 	costTexture = "default", -- default (Blizzard's) | power (as the power bar) | texture name
 	costColorMode = "default", -- default | power (a lighter power bar color) | custom
 	costColor = { r = 1, g = 1, b = 1, a = 0.6 },
+	spendFlash = true, -- Blizzard's flash on the part of the power bar you just spent or gained
+	fullGlow = true, -- Blizzard's glow at the end of a full power bar (Rage, Energy, ...)
 	-- keybind text on icons
 	keybinds = false,
 	keybindSize = 0, -- 0 = automatic
@@ -192,6 +199,45 @@ function CMP.MigrateFrames(frames, oldGap)
 				settings.attachGap = 2
 			end
 		end
+	end
+end
+
+-- Custom buffs are only buffs your own casts start (the ones that can be timed in combat).
+-- Buffs from other players, added before, are removed (they would never show).
+function CMP.DropExternalBuffs(db)
+	local seen = db.seenBuffs
+	if type(seen) ~= "table" then
+		return
+	end
+	local external = {}
+	for id, info in pairs(seen) do
+		if type(info) == "table" and info.external then
+			external[id] = true
+			seen[id] = nil
+		end
+	end
+	if not next(external) then
+		return
+	end
+	local function Clean(frames)
+		local settings = type(frames) == "table" and frames.BuffIcon
+		local list = type(settings) == "table" and settings.custom
+		if type(list) ~= "table" then
+			return
+		end
+		local kept = {}
+		for _, entry in ipairs(list) do
+			if not (type(entry) == "table" and entry.kind == "aura" and external[entry.id]) then
+				table.insert(kept, entry)
+			end
+		end
+		settings.custom = #kept > 0 and kept or nil
+	end
+	for _, layout in pairs(db.layouts or {}) do
+		Clean(layout)
+	end
+	for _, profile in pairs(db.profiles or {}) do
+		Clean(profile.frames)
 	end
 end
 
@@ -363,6 +409,52 @@ function CMP:IsManagedDefault(frame)
 	return frame.isManagedFrame and frame.systemInfo and frame.systemInfo.isInDefaultPosition or false
 end
 
+-- Blizzard's color picker applies a typed hex value only on Enter: typing one and clicking
+-- Okay keeps the old color. For our pickers, apply six typed digits at once, and a shorter
+-- value (expanded the way Enter does) when Okay is clicked.
+local pickerHooked, pickerOwned
+
+local function HexDigits(box)
+	local text = box:GetText() or ""
+	return text:match("^%x+$") and text or nil
+end
+
+function CMP:OpenColorPicker(info)
+	local frame = ColorPickerFrame
+	local content = frame and frame.Content
+	local box = content and content.HexBox
+	local picker = content and content.ColorPicker
+	local okay = frame and frame.Footer and frame.Footer.OkayButton
+	if not pickerHooked and box and picker and box.HookScript and CreateColorFromRGBAHexString then
+		pickerHooked = true
+		box:HookScript("OnTextChanged", function(self, userInput)
+			local text = pickerOwned and userInput and HexDigits(self)
+			if text and #text == 6 then
+				local color = CreateColorFromRGBAHexString(text .. "ff")
+				if color then
+					picker:SetColorRGB(color:GetRGB())
+				end
+			end
+		end)
+		if okay and okay.HookScript and box.OnEnterPressed then
+			okay:HookScript("PreClick", function()
+				local text = pickerOwned and HexDigits(box)
+				if text and #text < 6 then
+					box:OnEnterPressed()
+				end
+			end)
+		end
+		frame:HookScript("OnHide", function()
+			pickerOwned = nil
+		end)
+		hooksecurefunc(frame, "SetupColorPickerAndShow", function()
+			pickerOwned = nil -- another add-on's picker, until we claim it below
+		end)
+	end
+	frame:SetupColorPickerAndShow(info)
+	pickerOwned = true
+end
+
 -- Non-protected frames can be moved in combat. If something protected got anchored to
 -- one of ours, wait until combat ends.
 function CMP:CanTouch(frame)
@@ -509,6 +601,8 @@ events:SetScript("OnEvent", function(_, event, arg1)
 				CMP.MigrateFrames(profile.frames, oldGap)
 			end
 			db.version = 2
+			CMP.DropExternalBuffs(db)
+			db.buffTriggers, db.randomTriggers = nil, nil -- (0.3 development builds)
 			for _, layout in pairs(db.layouts) do
 				for _, settings in pairs(layout) do
 					if settings.attachTo == "screen" then
@@ -638,6 +732,8 @@ SlashCmdList.COOLDOWNMANAGEREXTRAS = function(msg)
 		end
 	elseif msg == "probe" then
 		CMP.Diagnostics:Probe()
+	elseif msg == "probe events" then
+		CMP.Diagnostics:ToggleEventProbe()
 	elseif msg:match("^probe%s") or msg == "probe aura" then
 		local kind, arg = msg:match("^probe%s+(%a+)%s*(.-)$")
 		CMP.Diagnostics:ProbeOne(kind, arg)
@@ -665,6 +761,7 @@ SlashCmdList.COOLDOWNMANAGEREXTRAS = function(msg)
 		print("  /cme status - show what the addon sees")
 		print("  /cme probe - can addons read your tracked auras right now? (try it in combat)")
 		print("  /cme probe spell|item|slot|aura <id> - can addons read this cooldown or buff right now? (try it in combat)")
+		print("  /cme probe events - log what the game tells addons when buffs come and go (try a gear proc in combat)")
 		print("  /cme timers - what the debuff timers see right now (try it when one is missing)")
 		print("  /cme rings - what the addon can read from the debuff-type rings")
 		print("  /cme blocked - list \"Interface action failed\" events and the addon the game blamed")

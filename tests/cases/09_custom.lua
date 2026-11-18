@@ -367,57 +367,48 @@ local function buffFrames(H)
 	return customFrames(H, "BuffIcon")
 end
 
-T.test("custom buffs: a buff from another player shows while it is on you", function(H, T)
-	local CMP = H.CMP
-	unmanaged(H, "BuffIcon")
-	populate(H, "BuffIcon", { 100 })
-	H.spells[10060] = { name = "Power Infusion" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
-	H.flush()
-	T.eq(#buffFrames(H), 0, "not on you: hidden")
-	local aura = H.addAura("player", { spellId = 10060, name = "Power Infusion", icon = 555, isHelpful = true,
-		duration = 15, expirationTime = H.now + 15, isFromPlayerOrPlayerPet = false })
+-- your own buff ID appears on you (out of combat) after your cast of it, then ends
+local function learnBuff(H, id, duration, extra)
+	H.spells[id] = H.spells[id] or { name = "Buff " .. id }
+	H.fireEvent("UNIT_SPELLCAST_SENT", "player", "", "guid", id)
+	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", id)
+	local aura = { spellId = id, name = H.spells[id].name, isHelpful = true, duration = duration,
+		expirationTime = H.now + duration, isFromPlayerOrPlayerPet = true }
+	for k, v in pairs(extra or {}) do aura[k] = v end
+	aura = H.addAura("player", aura)
 	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
 	H.advance(0.1)
 	H.flush()
-	local icons = buffFrames(H)
-	T.eq(#icons, 1, "shown")
-	T.eq(icons[1].Icon:GetTexture(), 555, "the buff's own icon")
-	T.falsy(icons[1].Icon:IsDesaturated())
-	T.truthy(CMP.Custom:SeenBuffs()[10060].external, "remembered as from another player")
 	H.removeAura("player", aura.auraInstanceID)
 	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(0.1)
+	H.advance(30)
 	H.flush()
-	T.eq(#buffFrames(H), 0, "gone again")
-end)
+end
 
-T.test("custom buffs: in combat (buff hidden), a buff you start is timed from your cast", function(H, T)
+-- your cast of id (target: nil = yourself or no target)
+local castCount = 0
+local function cast(H, id, target)
+	castCount = castCount + 1
+	local guid = "cast-" .. castCount
+	H.fireEvent("UNIT_SPELLCAST_SENT", "player", target or "", guid, id)
+	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", guid, id)
+	H.advance(0.1)
+	H.flush()
+end
+
+T.test("custom buffs: in combat (buff hidden), a buff of a spell you know is timed from your cast", function(H, T)
 	local CMP = H.CMP
 	unmanaged(H, "BuffIcon")
 	populate(H, "BuffIcon", { 100 })
-	local TRINKET_USE, BUFF = 500, 600
-	H.spells[BUFF] = { name = "Cocoon" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = BUFF })
-	-- once out of combat: cast, then the buff appears -> learned
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", TRINKET_USE)
-	local aura = H.addAura("player", { spellId = BUFF, name = "Cocoon", isHelpful = true, duration = 12,
-		expirationTime = H.now + 12, isFromPlayerOrPlayerPet = true })
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(0.1)
-	H.flush()
-	T.eq(CMP.db.buffTriggers[BUFF], TRINKET_USE, "trigger learned")
-	T.eq(CMP.db.buffDurations[BUFF], 12, "duration learned")
-	H.removeAura("player", aura.auraInstanceID)
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(20)
-	H.flush()
-	-- in combat the game hides it from lookups
+	H.spells[600] = { name = "Shield" }
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	T.eq(CMP.Custom:BuffStatus(600), "unlearned", "duration not seen yet")
+	learnBuff(H, 600, 12)
+	T.eq(CMP.Custom:BuffStatus(600), "ok")
+	T.eq(CMP.db.buffDurations[600], 12, "duration learned")
 	H.inCombat = true
-	aura = H.addAura("player", { spellId = BUFF, isHelpful = true, hiddenFromLookup = true })
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "guid2", TRINKET_USE)
-	H.advance(0.1)
-	H.flush()
+	H.addAura("player", { spellId = 600, isHelpful = true, hiddenFromLookup = true })
+	cast(H, 600)
 	local icons = buffFrames(H)
 	T.eq(#icons, 1, "shown from the cast")
 	local _, duration = icons[1].Cooldown:GetCooldownTimes()
@@ -428,163 +419,231 @@ T.test("custom buffs: in combat (buff hidden), a buff you start is timed from yo
 	H.inCombat = false
 end)
 
-T.test("custom buffs: Tracked Buffs showing inactive buffs keeps ours, grayed", function(H, T)
+T.test("custom buffs: an item's use effect counts as yours (trinkets, potions)", function(H, T)
 	local CMP = H.CMP
 	unmanaged(H, "BuffIcon")
 	populate(H, "BuffIcon", { 100 })
-	H.viewers.BuffIcon.hideWhenInactive = false
-	H.spells[10060] = { name = "Power Infusion" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
-	H.flush()
-	local icons = buffFrames(H)
-	T.eq(#icons, 1)
-	T.truthy(icons[1].Icon:IsDesaturated())
+	H.spells[650] = { name = "Speed", known = false }
+	H.items[7000] = { name = "Trinket", use = "Speed", useSpellID = 650, equippable = true, equipped = true }
+	H.inventory[13] = 7000
+	CMP.Custom:ItemsChanged()
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 650 })
+	learnBuff(H, 650, 15)
+	T.eq(CMP.Custom:BuffStatus(650), "ok")
+	H.inCombat = true
+	cast(H, 650)
+	T.eq(#buffFrames(H), 1)
+	H.inCombat = false
 end)
 
-T.test("custom buffs: the Tracked Buffs + menu lists buffs seen on you, from others apart", function(H, T)
+T.test("custom buffs: buffs from other players and passive procs are never shown", function(H, T)
 	local CMP = H.CMP
-	H.spells[10060] = { name = "Power Infusion" }
-	H.spells[17] = { name = "Shield" }
-	H.addAura("player", { spellId = 10060, name = "Power Infusion", isHelpful = true, duration = 15,
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	H.spells[10060] = { name = "Power Infusion", known = false }
+	H.spells[18] = { name = "Proc", known = false }
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 18 })
+	H.addAura("player", { spellId = 10060, isHelpful = true, duration = 15,
 		expirationTime = H.now + 15, isFromPlayerOrPlayerPet = false })
-	H.addAura("player", { spellId = 17, name = "Shield", isHelpful = true, duration = 15,
-		expirationTime = H.now + 15, isFromPlayerOrPlayerPet = true })
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	local _, frames = settings(H, { 100 })
-	local window = CooldownViewerSettings
-	-- a third section for Tracked Buffs
-	local _, buffSections = H.makeCooldownSettings({ { category = H.G.Enum.CooldownViewerCategory.TrackedBuff, spells = { 100 } } })
-	CMP.CustomSettings:Refresh()
-	local add = addTile(buffSections[1])
-	T.truthy(add, "+ tile in Tracked Buffs")
-	add:GetScript("OnMouseUp")(add, "LeftButton")
-	local menu = H.lastMenu
-	T.truthy(menu:Find("From Others"):Find("Power Infusion"))
-	T.truthy(menu:Find("Your Own"):Find("Shield"))
-	T.truthy(menu:Find("On You Now"):Find("Power Infusion"))
-	menu:Find("From Others"):Find("Power Infusion").fn()
-	T.eq(CMP.Custom:Entries("BuffIcon")[1].kind, "aura")
-	T.eq(CMP.Custom:Entries("BuffIcon")[1].id, 10060)
-end)
-
--- learn: cast TRIGGER, own buff BUFF appears with duration d (out of combat), then it ends
-local function learnBuff(H, trigger, buff, duration)
-	H.spells[buff] = H.spells[buff] or { name = "Buff " .. buff }
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", trigger)
-	local aura = H.addAura("player", { spellId = buff, isHelpful = true, duration = duration,
-		expirationTime = H.now + duration, isFromPlayerOrPlayerPet = true })
+	H.addAura("player", { spellId = 18, isHelpful = true, duration = 10,
+		expirationTime = H.now + 10, isFromPlayerOrPlayerPet = true })
 	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
 	H.advance(0.1)
 	H.flush()
-	H.removeAura("player", aura.auraInstanceID)
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(30)
-	H.flush()
-end
+	T.eq(#buffFrames(H), 0, "not shown, also out of combat")
+	T.eq(CMP.Custom:BuffStatus(10060), "notyours")
+	T.eq(CMP.Custom:BuffStatus(18), "notyours")
+	T.eq(CMP.Custom:SeenBuffs()[10060], nil, "buffs from others aren't remembered")
+end)
 
-T.test("custom buffs: a buff cast before the pull keeps its timer when combat hides it", function(H, T)
+T.test("custom buffs: your own buff, given to you by another player, isn't shown", function(H, T)
 	local CMP = H.CMP
 	unmanaged(H, "BuffIcon")
 	populate(H, "BuffIcon", { 100 })
 	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
-	learnBuff(H, 500, 600, 20)
-	-- cast out of combat, buff readable...
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 500)
+	learnBuff(H, 600, 15)
+	H.addAura("player", { spellId = 600, isHelpful = true, duration = 15,
+		expirationTime = H.now + 15, isFromPlayerOrPlayerPet = false })
+	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 0, "it couldn't show in combat either")
+end)
+
+T.test("custom buffs: casting it on someone else doesn't show yours", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 15)
+	H.inCombat = true
+	cast(H, 600, "Ally")
+	T.eq(#buffFrames(H), 0)
+	cast(H, 600, "Tester") -- yourself, by name
+	T.eq(#buffFrames(H), 1)
+	H.inCombat = false
+end)
+
+T.test("custom buffs: queued casts are matched by cast, and an unknown target doesn't count", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 15)
+	H.inCombat = true
+	H.fireEvent("UNIT_SPELLCAST_SENT", "player", "Ally", "A", 600)
+	H.fireEvent("UNIT_SPELLCAST_SENT", "player", "", "B", 600) -- queued, on yourself
+	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "A", 600)
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 0, "cast A went to the ally")
+	H.fireEvent("UNIT_SPELLCAST_SENT", "player", H.secret("Someone"), "C", 600)
+	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "C", 600)
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 0, "hidden target: not counted")
+	cast(H, 600, "Tester-SomeRealm")
+	T.eq(#buffFrames(H), 1, "yourself with your realm")
+	H.inCombat = false
+end)
+
+T.test("custom buffs: item data that arrives late, and a running buff after your last potion", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	H.spells[660] = { name = "Potion Buff", known = false }
+	H.items[8000] = { name = "Potion", count = 1 }
+	H.inventory[13] = 8000 -- (where the mock looks for your items)
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 660 })
+	T.eq(CMP.Custom:BuffStatus(660), "notyours", "item's use effect not loaded yet")
+	H.items[8000].use, H.items[8000].useSpellID = "Potion Buff", 660
+	H.fireEvent("GET_ITEM_INFO_RECEIVED", 8000)
+	H.advance(0.1)
+	learnBuff(H, 660, 20)
+	T.eq(CMP.Custom:BuffStatus(660), "ok", "known once the item data arrived")
+	H.inCombat = true
+	cast(H, 660)
+	H.inventory[13] = nil -- the last one is used up
+	H.fireEvent("BAG_UPDATE_DELAYED")
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 1, "its buff still runs")
+	H.inCombat = false
+end)
+
+T.test("custom buffs: out of combat, a buff that ended early is hidden", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 30)
+	cast(H, 600)
+	local aura = H.addAura("player", { spellId = 600, isHelpful = true, duration = 30,
+		expirationTime = H.now + 30, isFromPlayerOrPlayerPet = true })
+	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 1)
+	H.advance(2)
+	H.removeAura("player", aura.auraInstanceID) -- cancelled
+	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
+	H.advance(0.1)
+	H.flush()
+	T.eq(#buffFrames(H), 0)
+end)
+
+T.test("custom buffs: a buff cast just before the pull keeps its timer when combat hides it", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 20)
+	cast(H, 600)
 	local aura = H.addAura("player", { spellId = 600, isHelpful = true, duration = 20,
 		expirationTime = H.now + 20, isFromPlayerOrPlayerPet = true })
 	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
 	H.advance(0.1)
 	H.flush()
-	-- ...then the pull hides it
 	H.inCombat = true
 	aura.hiddenFromLookup = true
 	H.fireEvent("PLAYER_REGEN_DISABLED")
 	H.advance(2)
 	H.flush()
-	T.eq(#buffFrames(H), 1, "still shown, timed from the cast")
+	T.eq(#buffFrames(H), 1, "timed from the cast")
 	H.inCombat = false
 end)
 
-T.test("custom buffs: casting a buff on someone else never shows yours (no learned trigger)", function(H, T)
-	local CMP = H.CMP
-	unmanaged(H, "BuffIcon")
-	populate(H, "BuffIcon", { 100 })
-	H.spells[10060] = { name = "Power Infusion" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
-	-- received from another player once (duration learned, not tied to your casts)
-	local aura = H.addAura("player", { spellId = 10060, isHelpful = true, duration = 15,
-		expirationTime = H.now + 15, isFromPlayerOrPlayerPet = false })
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(0.1)
-	H.flush()
-	H.removeAura("player", aura.auraInstanceID)
-	H.advance(30)
-	H.flush()
-	H.inCombat = true
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 10060) -- you cast it on an ally
-	H.advance(0.1)
-	H.flush()
-	T.eq(#buffFrames(H), 0)
-	T.eq(CMP.db.buffTriggers and CMP.db.buffTriggers[10060], nil)
-	H.inCombat = false
-end)
-
-T.test("custom buffs: an already-running buff doesn't learn an unrelated cast as its trigger", function(H, T)
-	local CMP = H.CMP
-	H.spells[600] = { name = "Old Buff" }
-	H.addAura("player", { spellId = 600, isHelpful = true, duration = 60,
-		expirationTime = H.now + 50, isFromPlayerOrPlayerPet = true }) -- started 10 s ago
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 999)
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
-	H.advance(0.1)
-	H.flush()
-	T.eq(CMP.db.buffTriggers and CMP.db.buffTriggers[600], nil)
-end)
-
-T.test("custom buffs: each timed buff hides on its own time; combat end clears the timing", function(H, T)
+T.test("custom buffs: each timed buff hides on its own time", function(H, T)
 	local CMP = H.CMP
 	unmanaged(H, "BuffIcon")
 	populate(H, "BuffIcon", { 100 })
 	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 601 })
-	learnBuff(H, 500, 600, 6)
-	learnBuff(H, 500, 601, 20)
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 610 })
+	learnBuff(H, 600, 6)
+	learnBuff(H, 610, 20)
 	H.inCombat = true
-	H.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "g", 500)
-	H.advance(0.1)
-	H.flush()
+	cast(H, 600)
+	cast(H, 610)
 	T.eq(#buffFrames(H), 2)
 	H.advance(7)
 	H.flush()
 	T.eq(#buffFrames(H), 1, "the short one is gone")
 	H.inCombat = false
-	H.fireEvent("PLAYER_REGEN_ENABLED")
-	H.advance(0.1)
-	H.flush()
-	T.eq(#buffFrames(H), 0, "out of combat: read directly (not on you)")
 end)
 
-T.test("custom settings: buffs with the same name show their duration and spell ID", function(H, T)
-	H.addAura("player", { spellId = 1301168, name = "Transformative Cocoon", isHelpful = true, duration = 5,
-		expirationTime = H.now + 5, isFromPlayerOrPlayerPet = true })
-	H.addAura("player", { spellId = 1316048, name = "Transformative Cocoon", isHelpful = true, duration = 0,
-		expirationTime = 0, isFromPlayerOrPlayerPet = true })
-	H.addAura("player", { spellId = 1301167, name = "Transformative Cocoon", isHarmful = true, duration = 5,
-		expirationTime = H.now + 5, isFromPlayerOrPlayerPet = true })
-	local _, sections = H.makeCooldownSettings({ { category = H.G.Enum.CooldownViewerCategory.TrackedBuff, spells = { 100 } } })
-	H.CMP.CustomSettings:Start()
-	H.CMP.CustomSettings:Refresh()
-	local add = addTile(sections[1])
+T.test("custom buffs: Tracked Buffs showing inactive buffs keeps ours, grayed", function(H, T)
+	local CMP = H.CMP
+	unmanaged(H, "BuffIcon")
+	populate(H, "BuffIcon", { 100 })
+	H.viewers.BuffIcon.hideWhenInactive = false
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 10)
+	local icons = buffFrames(H)
+	T.eq(#icons, 1)
+	T.truthy(icons[1].Icon:IsDesaturated())
+end)
+
+T.test("custom buffs: the + menu offers only buffs your own spells and items start", function(H, T)
+	local CMP = H.CMP
+	H.spells[10060] = { name = "Power Infusion", known = false }
+	H.spells[17] = { name = "Shield" }
+	H.spells[18] = { name = "Proc", known = false }
+	learnBuff(H, 17, 15)
+	H.addAura("player", { spellId = 10060, name = "Power Infusion", isHelpful = true, duration = 15,
+		expirationTime = H.now + 15, isFromPlayerOrPlayerPet = false })
+	H.addAura("player", { spellId = 18, name = "Proc", isHelpful = true, duration = 10,
+		expirationTime = H.now + 10, isFromPlayerOrPlayerPet = true })
+	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
+	settings(H, { 100 })
+	local _, buffSections = H.makeCooldownSettings({ { category = H.G.Enum.CooldownViewerCategory.TrackedBuff, spells = { 100 } } })
+	CMP.CustomSettings:Refresh()
+	local add = addTile(buffSections[1])
+	T.truthy(add, "+ tile in Tracked Buffs")
 	add:GetScript("OnMouseUp")(add, "LeftButton")
-	local now = H.lastMenu:Find("On You Now")
-	T.truthy(now:Find("5 s, 1301168"), "duration and ID")
-	T.truthy(now:Find("no timer, 1316048"))
-	T.truthy(now:Find("debuff"), "the self-stun is listed, marked as a debuff")
-	T.truthy(now:Find("5 s, 1301167"))
+	local started = H.lastMenu:Find("Started by Your Spells and Items")
+	T.truthy(started:Find("Shield"))
+	T.falsy(started:Find("Power Infusion"), "from another player: not offered")
+	T.falsy(started:Find("Proc"), "passive proc: not offered")
+	T.truthy(started:Find("15 s, 17"), "duration and ID")
+	started:Find("Shield").fn()
+	T.eq(CMP.Custom:Entries("BuffIcon")[1].id, 17)
 	T.eq(H.CMP.CustomSettings.FormatDuration(120), "2 min")
 end)
 
-T.test("custom buffs: a debuff you put on yourself shows and is remembered, even if the spell ID lookup skips debuffs", function(H, T)
+T.test("custom buffs: adding one that can't show says why", function(H, T)
+	local CMP = H.CMP
+	H.spells[600] = { name = "Shield" }
+	H.spells[18] = { name = "Proc", known = false }
+	CMP.CustomSettings:AddAura("BuffIcon", 600)
+	T.truthy(T.printed(H, "Duration not known yet"), "known spell, not cast yet")
+	CMP.CustomSettings:AddAura("BuffIcon", 18)
+	T.truthy(T.printed(H, "can't be shown"), "not yours")
+	learnBuff(H, 600, 10)
+	T.eq(CMP.CustomSettings:BuffProblem(600), nil)
+end)
+
+T.test("custom buffs: a debuff your item puts on you shows, even if the spell ID lookup skips debuffs", function(H, T)
 	local CMP = H.CMP
 	unmanaged(H, "BuffIcon")
 	populate(H, "BuffIcon", { 100 })
@@ -616,12 +675,9 @@ T.test("custom buffs: they join Tracked Buffs' row instead of wrapping to a new 
 	unmanaged(H, "BuffIcon")
 	local items = populate(H, "BuffIcon", { 100, 200, 300 })
 	H.viewers.BuffIcon.stride = 3 -- Blizzard's stride: its own icon count
-	H.spells[10060] = { name = "Power Infusion" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
-	H.addAura("player", { spellId = 10060, isHelpful = true, duration = 15, expirationTime = H.now + 15 })
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(0.1)
-	H.flush()
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 15)
+	cast(H, 600)
 	local icon = buffFrames(H)[1]
 	T.near(icon:GetTop(), items[1]:GetTop(), 0.5, "same row")
 	T.truthy(icon:GetLeft() > items[3]:GetLeft(), "after Blizzard's")
@@ -631,12 +687,44 @@ T.test("custom buffs: same row also when the viewer keeps Blizzard's place", fun
 	local CMP = H.CMP
 	local items = populate(H, "BuffIcon", { 100, 200, 300 })
 	H.viewers.BuffIcon.stride = 3
-	H.spells[10060] = { name = "Power Infusion" }
-	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 10060 })
-	H.addAura("player", { spellId = 10060, isHelpful = true, duration = 15, expirationTime = H.now + 15 })
-	H.fireEvent("UNIT_AURA", "player", { isFullUpdate = true })
-	H.advance(0.1)
-	H.flush()
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 600 })
+	learnBuff(H, 600, 15)
+	cast(H, 600)
 	local icon = buffFrames(H)[1]
 	T.near(icon:GetTop(), items[1]:GetTop(), 0.5, "same row")
+end)
+
+T.test("custom buffs: buffs from other players saved by older versions are removed", function(H, T)
+	local db = {
+		seenBuffs = { [16609] = { name = "Warchief's Blessing", external = true }, [600] = { name = "Mine" } },
+		layouts = { Mine = { BuffIcon = { custom = { { kind = "aura", id = 16609 }, { kind = "aura", id = 600 } } } } },
+		profiles = { P = { frames = { BuffIcon = { custom = { { kind = "aura", id = 16609 } } } } } },
+	}
+	H.CMP.DropExternalBuffs(db)
+	T.eq(#db.layouts.Mine.BuffIcon.custom, 1)
+	T.eq(db.layouts.Mine.BuffIcon.custom[1].id, 600)
+	T.eq(db.profiles.P.frames.BuffIcon.custom, nil)
+	T.eq(db.seenBuffs[16609], nil)
+	T.truthy(db.seenBuffs[600])
+end)
+
+T.test("probe: /cme probe events logs aura changes, also with hidden values, and stops", function(H, T)
+	local CMP = H.CMP
+	H.spells[16609] = { name = "Warchief's Blessing" }
+	CMP.Custom:Add("BuffIcon", { kind = "aura", id = 16609 })
+	local slash = _G.SlashCmdList.COOLDOWNMANAGEREXTRAS
+	slash("probe events")
+	local probe = CMP.Diagnostics.eventProbe
+	T.truthy(probe.on)
+	local aura = H.addAura("player", { spellId = 16609, isHelpful = true, duration = 60, expirationTime = H.now + 60 })
+	H.fireEvent("UNIT_AURA", "player", { addedAuras = { aura } })
+	H.inCombat = true
+	H.fireEvent("UNIT_AURA", "player", { addedAuras = { H.secretFields(aura, "spellId", "name", "icon", "duration") } })
+	H.fireEvent("UNIT_AURA", "player", H.secret({}))
+	H.fireEvent("UNIT_AURA", "player", { removedAuraInstanceIDs = { H.secret(aura.auraInstanceID) } })
+	H.fireEvent("UNIT_AURA", "player", { updatedAuraInstanceIDs = { 1 } })
+	H.inCombat = false
+	T.eq(probe.count, 4, "value-only updates are not counted")
+	slash("probe events")
+	T.falsy(probe.on, "off again")
 end)
