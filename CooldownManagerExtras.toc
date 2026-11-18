@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Cooldown Manager |cff4fa3ffExtras|r
-## Notes: More Edit Mode options for Blizzard's Cooldown Manager: centering, anchoring, square icons, debuff timers, profiles. No replacement frames.
+## Notes: Blizzard's Cooldown Manager with the options it's missing, set up in Edit Mode and Cooldown Settings: anchoring, your own spells and buffs, square icons, bar colors. No replacement frames.
 ## Version: @project-version@
 ## Author: darfink
 ## X-License: MIT

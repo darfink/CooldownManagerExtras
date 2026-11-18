@@ -1,0 +1,446 @@
+[
+ {
+  "name": "01-hero",
+  "src": "2026-11-18 at 09.39.34",
+  "pre": [
+   1427,
+   1248,
+   2026,
+   1528
+  ],
+  "keep": [
+   [
+    10,
+    77,
+    590,
+    272
+   ],
+   [
+    192,
+    7,
+    406,
+    77
+   ]
+  ],
+  "scale": 1.5,
+  "size": [
+   1200,
+   640
+  ],
+  "at": [
+   164,
+   150
+  ],
+  "labels": [
+   {
+    "text": "Attached &amp; centered",
+    "sub": "Rows snap together, edge to edge",
+    "at": [
+     60,
+     30
+    ],
+    "from": [
+     330,
+     92
+    ],
+    "to": [
+     195,
+     40
+    ]
+   },
+   {
+    "text": "Your bar look",
+    "sub": "Color, texture, shading",
+    "at": [
+     760,
+     24
+    ],
+    "from": [
+     900,
+     100
+    ],
+    "to": [
+     500,
+     92
+    ]
+   },
+   {
+    "text": "Square icons",
+    "sub": "Crisp borders, shared edges",
+    "at": [
+     60,
+     565
+    ],
+    "from": [
+     250,
+     560
+    ],
+    "to": [
+     94,
+     247
+    ]
+   },
+   {
+    "text": "Same width",
+    "sub": "To the pixel, at any UI scale",
+    "at": [
+     1140,
+     560
+    ],
+    "align": "right",
+    "from": [
+     1010,
+     555
+    ],
+    "to": [
+     574,
+     247
+    ]
+   }
+  ]
+ },
+ {
+  "name": "02-edit-mode-panel",
+  "src": "2026-11-18 at 09.30.46",
+  "keep": [
+   [
+    18,
+    22,
+    762,
+    910
+   ],
+   [
+    766,
+    12,
+    1480,
+    980
+   ]
+  ],
+  "scale": 0.75,
+  "size": [
+   1200,
+   900
+  ],
+  "at": [
+   50,
+   150
+  ],
+  "labels": [
+   {
+    "text": "Your extra settings",
+    "sub": "In Blizzard's own Edit Mode panel",
+    "at": [
+     50,
+     30
+    ],
+    "from": [
+     200,
+     100
+    ],
+    "to": [
+     200,
+     60
+    ]
+   },
+   {
+    "text": "Attach to anything",
+    "sub": "Any Edit Mode frame, any side",
+    "at": [
+     440,
+     30
+    ],
+    "from": [
+     560,
+     100
+    ],
+    "to": [
+     560,
+     172
+    ]
+   },
+   {
+    "text": "Blizzard's settings",
+    "sub": "Untouched, right next to ours",
+    "at": [
+     1150,
+     30
+    ],
+    "align": "right",
+    "from": [
+     1000,
+     100
+    ],
+    "to": [
+     1120,
+     60
+    ]
+   }
+  ]
+ },
+ {
+  "name": "04-cooldown-settings-plus",
+  "src": "2026-11-18 at 09.32.15",
+  "keep": [
+   [
+    20,
+    30,
+    132,
+    142,
+    "e"
+   ],
+   [
+    28,
+    45,
+    770,
+    1190
+   ],
+   [
+    772,
+    105,
+    866,
+    420
+   ],
+   [
+    390,
+    375,
+    836,
+    642
+   ],
+   [
+    818,
+    538,
+    1192,
+    860
+   ]
+  ],
+  "scale": 0.75,
+  "size": [
+   1400,
+   940
+  ],
+  "at": [
+   40,
+   40
+  ],
+  "labels": [
+   {
+    "n": 1,
+    "text": "Add your own",
+    "sub": "Spells, items, trinket slots",
+    "at": [
+     960,
+     260
+    ],
+    "to": [
+     377,
+     377
+    ]
+   },
+   {
+    "n": 2,
+    "text": "From your bags",
+    "sub": "Potions, food, gadgets",
+    "at": [
+     960,
+     380
+    ],
+    "to": [
+     1170,
+     565
+    ]
+   },
+   {
+    "n": 3,
+    "text": "Or drag and drop",
+    "sub": "A spell or item onto the + tile",
+    "at": [
+     960,
+     500
+    ],
+    "to": [
+     300,
+     635
+    ]
+   }
+  ]
+ },
+ {
+  "name": "05-buff-menu",
+  "src": "2026-11-18 at 09.37.26",
+  "keep": [
+   [
+    15,
+    25,
+    127,
+    137,
+    "e"
+   ],
+   [
+    28,
+    40,
+    768,
+    1175
+   ],
+   [
+    762,
+    90,
+    865,
+    410
+   ]
+  ],
+  "fade": [
+   700,
+   860
+  ],
+  "scale": 0.75,
+  "size": [
+   1240,
+   870
+  ],
+  "at": [
+   40,
+   40
+  ],
+  "labels": [
+   {
+    "n": 1,
+    "text": "Buffs you started",
+    "sub": "With their durations, ready to add",
+    "at": [
+     700,
+     700
+    ],
+    "to": [
+     1500,
+     470
+    ]
+   },
+   {
+    "n": 2,
+    "text": "Also in combat",
+    "sub": "Timed from your cast",
+    "at": [
+     700,
+     770
+    ],
+    "to": [
+     1442,
+     330
+    ]
+   }
+  ],
+  "solid": [
+   [
+    550,
+    390,
+    985,
+    585
+   ],
+   [
+    978,
+    445,
+    1530,
+    835
+   ],
+   [
+    980,
+    195,
+    1442,
+    432
+   ]
+  ]
+ },
+ {
+  "name": "08-spell-menu",
+  "src": "2026-11-18 at 09.35.07",
+  "keep": [
+   [
+    10,
+    10,
+    122,
+    122,
+    "e"
+   ],
+   [
+    20,
+    25,
+    760,
+    1165
+   ],
+   [
+    755,
+    80,
+    860,
+    420
+   ]
+  ],
+  "fade": [
+   850,
+   1010
+  ],
+  "scale": 0.8,
+  "size": [
+   1460,
+   860
+  ],
+  "at": [
+   40,
+   40
+  ],
+  "labels": [
+   {
+    "n": 1,
+    "text": "Per-spell border",
+    "sub": "Its own color and size",
+    "at": [
+     1030,
+     300
+    ],
+    "to": [
+     515,
+     603
+    ]
+   },
+   {
+    "n": 2,
+    "text": "Cooldown, not buff",
+    "sub": "For spells that buff you",
+    "at": [
+     1030,
+     400
+    ],
+    "to": [
+     515,
+     677
+    ]
+   },
+   {
+    "n": 3,
+    "text": "Gray out during a debuff",
+    "sub": "Like Weakened Soul",
+    "at": [
+     1030,
+     500
+    ],
+    "to": [
+     515,
+     716
+    ]
+   }
+  ],
+  "solid": [
+   [
+    530,
+    282,
+    1002,
+    782
+   ],
+   [
+    985,
+    590,
+    1198,
+    1008
+   ]
+  ]
+ }
+]
